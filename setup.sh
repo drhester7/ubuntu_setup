@@ -158,16 +158,24 @@ install_gemini_cli() {
 
 # Main function
 main() {
+    INSTALL_GUI="true"
+    if [[ "$1" == "--no-gui" ]]; then
+        INSTALL_GUI="false"
+        log "Skipping GUI packages installation."
+    fi
+
     patch
     install_git # working
     install_gh # working
     install_uv # working
     install_podman # working
-    install_vscode # working
+    if [ "$INSTALL_GUI" = "true" ]; then
+        install_vscode # working
+    fi
     install_gemini_cli # working
     #install_speedtest # apt not officially supported for noble
 
     log "For good measure, you'll probably need to restart your shell or source ~/.bashrc"
 }
 
-main
+main "$@"
