@@ -288,7 +288,7 @@ main() {
         "nvidia_server_driver"
         "nvidia_container_toolkit"
         "nano"
-        "kerberos"
+        #"kerberos"
     )
 
     local gui_tools=(
