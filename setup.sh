@@ -209,7 +209,7 @@ install_nvidia_server_driver() {
     else
         log "Installing latest NVIDIA server driver..."
         sudo apt-get install ubuntu-drivers-common -y
-        sudo ubuntu-drivers autoinstall
+        sudo ubuntu-drivers install
     fi
 }
 
