@@ -17,16 +17,21 @@ This script automates the setup of a development environment on a fresh Ubuntu i
     ./setup.sh
     ```
 
-## Installed Packages
+## Installed Tools
 
-This script installs the following packages:
+This script installs the following tools:
 
-*   curl
-*   wget
-*   nvm (Node Version Manager)
-*   git
-*   gh (GitHub CLI)
-*   uv
-*   Visual Studio Code
-*   Podman
-*   @google/gemini-cli
+*   `git`: Version control system.
+*   `gh`: GitHub CLI.
+*   `uv`: Python package installer.
+*   `podman`: Container engine.
+*   `nvm`: Node Version Manager, used to install Node.js and npm.
+*   `@google/gemini-cli`: The Gemini CLI.
+*   Visual Studio Code: Code editor.
+*   Google Chrome: Web browser.
+*   `curl` and `wget`: Command-line tools for transferring data.
+*   `htop`: Interactive process viewer.
+*   `nano`: Text editor.
+*   `kerberos`: Network authentication protocol.
+*   `NVIDIA Server Driver`: For GPU support.
+*   `NVIDIA Container Toolkit`: For using NVIDIA GPUs in containers.
