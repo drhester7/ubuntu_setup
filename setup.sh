@@ -12,7 +12,9 @@ log() {
 
 patch() {
     log "patching host..."
-    sudo apt-get update && sudo apt-get upgrade -y
+    sudo apt update && sudo apt upgrade -y
+    sudo apt autoremove -y
+    sudo apt autoclean
 }
 
 # Function to install curl
@@ -103,6 +105,7 @@ install_gh() {
 	    sudo apt update
 	    sudo apt install gh -y
     fi
+    log "To authenticate run 'gh auth login'"
 }
 
 # Function to install speedtest
@@ -156,6 +159,18 @@ install_gemini_cli() {
     fi
 }
 
+# Function to install google chrome
+install_chrome() {
+    if command -v google-chrome-stable >/dev/null 2>&1; then
+        log "Google Chrome is already installed."
+    else
+        log "Installing google chrome..."
+        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        sudo apt install ./google-chrome-stable_current_amd64.deb
+        rm ./google-chrome-stable_current_amd64.deb
+    fi        
+}
+
 # Main function
 main() {
     INSTALL_GUI="true"
@@ -171,9 +186,15 @@ main() {
     install_podman # working
     if [ "$INSTALL_GUI" = "true" ]; then
         install_vscode # working
+        install_chrome # working
+        #set_dash_to_dock_settings # function needed
     fi
     install_gemini_cli # working
     #install_speedtest # apt not officially supported for noble
+    #install_htop # function needed
+    #install_nvidia_cuda # function needed
+    #install_nvidia_container_toolkit # function needed
+    
 
     log "For good measure, you'll probably need to restart your shell or source ~/.bashrc"
 }
