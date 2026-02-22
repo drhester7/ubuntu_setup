@@ -40,9 +40,9 @@ patch() {
 # Function to detect if running in a GUI environment
 is_gui_environment() {
     # Check if a display is available (active GUI session)
-    if [ -n "$DISPLAY" ]; then
-        return 0
-    fi
+#    if [ -n "$DISPLAY" ]; then
+#        return 0
+#    fi
     # Check if we are in a desktop session (e.g. Wayland or headless but with session)
     if [ -n "$XDG_CURRENT_DESKTOP" ]; then
         return 0
