@@ -6,12 +6,23 @@ set -e
 
 TEMP_FILES=()
 cleanup() {
-    log "Cleaning up temporary files..."
+    log "Cleaning up..."
+    if [ -n "$SUDO_ALIVE_PID" ]; then
+        kill "$SUDO_ALIVE_PID" 2>/dev/null
+    fi
     if [ ${#TEMP_FILES[@]} -gt 0 ]; then
         rm -f "${TEMP_FILES[@]}"
     fi
 }
 trap cleanup EXIT
+
+# Function to keep sudo timestamp alive
+keep_sudo_alive() {
+    while true; do
+        sudo -n -v 2>/dev/null || true
+        sleep 60
+    done
+}
 
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
@@ -28,11 +39,19 @@ patch() {
 
 # Function to detect if running in a GUI environment
 is_gui_environment() {
-    if systemctl get-default | grep -q "graphical.target"; then
-        return 0 # True, it's a GUI environment
-    else
-        return 1 # False, it's a headless environment
+    # Check if a display is available (active GUI session)
+    if [ -n "$DISPLAY" ]; then
+        return 0
     fi
+    # Check if we are in a desktop session (e.g. Wayland or headless but with session)
+    if [ -n "$XDG_CURRENT_DESKTOP" ]; then
+        return 0
+    fi
+    # Fallback to checking the system default target
+    if systemctl get-default 2>/dev/null | grep -q "graphical.target"; then
+        return 0
+    fi
+    return 1
 }
 
 
@@ -80,8 +99,17 @@ install_podman() {
 
 # Function to install nvm
 install_nvm() {
-    if [ -s "$HOME/.nvm/nvm.sh" ]; then
-        log "nvm is already installed."
+    export NVM_DIR="$HOME/.nvm"
+
+    # Try to source nvm if it exists
+    if [ -s "$NVM_DIR/nvm.sh" ]; then
+        log "Sourcing nvm..."
+        \. "$NVM_DIR/nvm.sh"
+        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+    fi
+
+    if command -v nvm >/dev/null 2>&1; then
+        log "nvm is already installed and sourced."
     else
         log "Installing nvm..."
         install_curl
@@ -95,15 +123,18 @@ install_nvm() {
         log "Latest nvm version is $LATEST_NVM_VERSION"
         curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$LATEST_NVM_VERSION/install.sh" | bash
 
-        # Sourcing for the script
-        export NVM_DIR="$HOME/.nvm"
-        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+        # Sourcing after fresh install
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+    fi
 
-        # install node lts
+    # Ensure Node.js is installed and active
+    if ! command -v node >/dev/null 2>&1; then
         log "Installing latest Node.js via nvm..."
         nvm install --lts
-        nvm use node # Explicitly use the installed node version
+        nvm use --lts
+    else
+        log "Node.js is already available: $(node -v)"
     fi
 }
 
@@ -202,14 +233,30 @@ install_htop() {
     install_apt_pkg "htop" "htop"
 }
 
+# Function to detect if NVIDIA hardware is present
+has_nvidia_hardware() {
+    # Ensure pciutils is installed for lspci
+    if ! command -v lspci >/dev/null 2>&1; then
+        sudo apt-get install -y pciutils >/dev/null 2>&1
+    fi
+
+    if lspci | grep -iq "nvidia"; then
+        return 0 # True, NVIDIA GPU detected
+    else
+        return 1 # False, no NVIDIA GPU found
+    fi
+}
+
 # Function to install nvidia server driver
 install_nvidia_server_driver() {
     if command -v nvidia-smi >/dev/null 2>&1; then
         log "NVIDIA driver is already installed."
-    else
+    elif has_nvidia_hardware; then
         log "Installing latest NVIDIA server driver..."
         sudo apt-get install ubuntu-drivers-common -y
         sudo ubuntu-drivers install
+    else
+        log "No NVIDIA hardware detected. Skipping driver installation."
     fi
 }
 
@@ -217,7 +264,7 @@ install_nvidia_server_driver() {
 install_nvidia_container_toolkit() {
     if command -v nvidia-container-cli >/dev/null 2>&1; then
         log "nvidia-container-toolkit is already installed."
-    else
+    elif has_nvidia_hardware; then
         log "Installing nvidia-container-toolkit..."
         install_curl
         curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
@@ -226,6 +273,8 @@ install_nvidia_container_toolkit() {
             sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
         sudo apt-get update
         sudo apt-get install -y nvidia-container-toolkit
+    else
+        log "No NVIDIA hardware detected. Skipping nvidia-container-toolkit installation."
     fi
 }
 
@@ -278,6 +327,10 @@ main() {
     log "Requesting administrator privileges..."
     sudo -v
 
+    # Keep sudo alive in the background
+    keep_sudo_alive &
+    SUDO_ALIVE_PID=$!
+
     local cli_tools=(
         "git"
         "gh"
@@ -320,7 +373,14 @@ main() {
     fi
     
 
-    log "For good measure, you'll probably need to restart your shell or source ~/.bashrc"
+    log "Setup complete! All tools have been installed."
+    
+    local shell_config="$HOME/.bashrc"
+    [[ "$SHELL" == *"zsh"* ]] && shell_config="$HOME/.zshrc"
+
+    log "To apply all changes (like nvm and gemini-cli) in this shell session, run:"
+    log "  source $shell_config"
+    log "Alternatively, you can start a fresh session by running: exec $SHELL"
 }
 
 main "$@"
