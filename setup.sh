@@ -44,9 +44,9 @@ is_gui_environment() {
 #        return 0
 #    fi
     # Check if we are in a desktop session (e.g. Wayland or headless but with session)
-    if [ -n "$XDG_CURRENT_DESKTOP" ]; then
-        return 0
-    fi
+#    if [ -n "$XDG_CURRENT_DESKTOP" ]; then
+#        return 0
+#    fi
     # Fallback to checking the system default target
     if systemctl get-default 2>/dev/null | grep -q "graphical.target"; then
         return 0
