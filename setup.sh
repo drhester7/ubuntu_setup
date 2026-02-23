@@ -7,6 +7,7 @@ set -o pipefail
 
 # --- Globals ---
 LOG_FILE="/tmp/ubuntu_setup_$(date +%Y%m%d_%H%M%S).log"
+VERBOSE=false
 INSTALLED=(); SKIPPED=(); FAILED=(); INCOMPATIBLE=()
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; MAGENTA='\033[0;35m'; NC='\033[0m'
 
@@ -69,12 +70,16 @@ prime_sudo() {
 }
 
 run_quiet() {
-    "$@" >> "$LOG_FILE" 2>&1
+    if [ "$VERBOSE" = true ]; then
+        "$@" 2>&1 | tee -a "$LOG_FILE"
+    else
+        "$@" >> "$LOG_FILE" 2>&1
+    fi
 }
 
 show_spinner() {
     local pid=$1; local spinstr='|/-\'
-    if [ -t 1 ]; then
+    if [ -t 1 ] && [ "$VERBOSE" = false ]; then
         while kill -0 "$pid" 2>/dev/null; do
             local temp=${spinstr#?}; printf " [%c]  " "$spinstr"; spinstr=$temp${spinstr%"$temp"}
             sleep 0.1; printf "\b\b\b\b\b\b"
@@ -87,15 +92,29 @@ run_logged() {
     if [[ "$*" == *"sudo"* ]]; then
         prime_sudo
     fi
-    printf "${BLUE}[INFO]${NC}  $msg... "
-    "$@" >> "$LOG_FILE" 2>&1 &
-    local pid=$!
-    show_spinner "$pid"
-    if wait "$pid"; then
-        printf "\r${GREEN}[OK]${NC}    $msg.   \n"
+    
+    local status=0
+    if [ "$VERBOSE" = true ]; then
+        log_info "$msg..."
+        "$@" 2>&1 | tee -a "$LOG_FILE" || status=$?
+    else
+        printf "${BLUE}[INFO]${NC}  $msg... "
+        "$@" >> "$LOG_FILE" 2>&1 &
+        local pid=$!
+        show_spinner "$pid"
+        wait "$pid" || status=$?
+    fi
+
+    if [ $status -eq 0 ]; then
+        if [ "$VERBOSE" = true ]; then
+            log_success "$msg."
+        else
+            printf "\r${GREEN}[OK]${NC}    $msg.   \n"
+        fi
         return 0
     else
-        printf "\r${RED}[ERROR]${NC} $msg. Check $LOG_FILE\n"
+        if [ "$VERBOSE" = false ]; then printf "\r"; fi
+        log_error "$msg. Check $LOG_FILE"
         return 1
     fi
 }
@@ -132,9 +151,34 @@ apt_install() {
 
 add_apt_repo() {
     local key_url="$1" name="$2" repo_line="$3"
-    wget -qO- "$key_url" | gpg --dearmor | sudo tee "/usr/share/keyrings/${name}.gpg" > /dev/null
-    echo "$repo_line" | sudo tee "/etc/apt/sources.list.d/${name}.list" > /dev/null
-    run_quiet sudo apt-get update
+    local keyring_dir="/etc/apt/keyrings"
+    local keyring_path="${keyring_dir}/${name}.gpg"
+    local list_path="/etc/apt/sources.list.d/${name}.list"
+    
+    sudo mkdir -p -m 755 "$keyring_dir"
+    
+    local tmp_key; tmp_key=$(mktemp)
+    if ! curl -fsSL "$key_url" -o "$tmp_key"; then
+        rm -f "$tmp_key"
+        return 1
+    fi
+    
+    if grep -q "BEGIN PGP" "$tmp_key"; then
+        cat "$tmp_key" | gpg --dearmor | sudo tee "$keyring_path" > /dev/null
+    else
+        sudo cp "$tmp_key" "$keyring_path"
+    fi
+    rm -f "$tmp_key"
+    sudo chmod 644 "$keyring_path"
+    
+    echo "$repo_line" | sudo tee "$list_path" > /dev/null
+    
+    # Validate the repo with a targeted update
+    if ! run_quiet sudo apt-get update -o Dir::Etc::sourcelist="$list_path" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"; then
+        sudo rm -f "$list_path" "$keyring_path"
+        return 1
+    fi
+    return 0
 }
 
 github_bin_install() {
@@ -190,13 +234,13 @@ install_nvm() {
 
 install_gh() {
     add_apt_repo "https://cli.github.com/packages/githubcli-archive-keyring.gpg" "github-cli" \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/github-cli.gpg] https://cli.github.com/packages stable main" && \
     apt_install gh
 }
 
 install_vscode() {
     add_apt_repo "https://packages.microsoft.com/keys/microsoft.asc" "vscode" \
-        "deb [arch=amd64,arm64,armhf signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main"
+        "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/vscode.gpg] https://packages.microsoft.com/repos/code stable main" && \
     apt_install code
 }
 
@@ -218,13 +262,13 @@ install_opentofu() {
 
 install_gcloud() {
     add_apt_repo "https://packages.cloud.google.com/apt/doc/apt-key.gpg" "google-cloud" \
-        "deb [signed-by=/usr/share/keyrings/google-cloud.gpg] https://packages.cloud.google.com/apt cloud-sdk main"
+        "deb [signed-by=/etc/apt/keyrings/google-cloud.gpg] https://packages.cloud.google.com/apt cloud-sdk main" && \
     apt_install google-cloud-cli
 }
 
 install_kubectl() {
     add_apt_repo "https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key" "kubernetes" \
-        "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
+        "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" && \
     apt_install kubectl
 }
 
@@ -254,11 +298,8 @@ install_tldr()    { run_quiet npm install -g tldr; }
 install_nvidia() {
     apt_install ubuntu-drivers-common
     run_quiet sudo ubuntu-drivers install
-    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia.gpg
-    curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
-        sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia.gpg] https://#g' | \
-        sudo tee /etc/apt/sources.list.d/nvidia.list > /dev/null
-    run_quiet sudo apt-get update
+    add_apt_repo "https://nvidia.github.io/libnvidia-container/gpgkey" "nvidia" \
+        "deb [signed-by=/etc/apt/keyrings/nvidia.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list /" && \
     apt_install nvidia-container-toolkit
 }
 
@@ -339,7 +380,16 @@ EOF"; then
 
 # --- Main ---
 main() {
+    # Argument parsing
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -v|--verbose) VERBOSE=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
     touch "$LOG_FILE"; echo -e "${BLUE}=== Ubuntu Setup ===${NC}\nLogs: $LOG_FILE"
+    if [ "$VERBOSE" = true ]; then log_info "Verbose mode enabled."; fi
     
     if is_container; then
         run_logged "Initializing container environment" sudo apt-get update
@@ -351,7 +401,7 @@ main() {
     source_nvm
     export PATH="$HOME/.local/bin:$PATH"
 
-    run_logged "Ensuring base requirements" apt_install curl wget gpg pciutils build-essential unzip
+    run_logged "Ensuring base requirements" apt_install curl wget gpg gnupg pciutils build-essential unzip
 
     # CLI Toolchain
     execute_tool "git"      "Git"            apt_install git
@@ -376,7 +426,7 @@ main() {
     execute_tool "kubectl"  "kubectl"        install_kubectl
     execute_tool "kubectx"  "kubectx/kubens" install_kubectx
     execute_tool "aws"      "AWS CLI"        install_aws
-    execute_tool "az"       "Azure CLI"      install_az
+    execute_tool "az"       "Azure CLI"      "install_az"
     execute_tool "k9s"      "k9s"            install_k9s
 
     # Node tools

@@ -75,6 +75,7 @@ Alternatively, you can clone the repository and run it locally:
 *   **Dock:** Positioned at the bottom, panel mode disabled, intellihide enabled.
 *   **Display:** Preferred Dark Mode and disabled fractional scaling experimental features.
 *   **Power:** Automatically switched to the 'Performance' profile.
+*   **Aesthetics:** Sets the default background to the high-quality "Quokka Everywhere" theme.
 
 ### Maintenance
 *   **Firmware:** Automated hardware metadata refresh and update via `fwupdmgr`.

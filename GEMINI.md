@@ -15,20 +15,34 @@ This project provides a robust automation script (`setup.sh`) to transform a fre
 - **Containers:** `podman`, `podman-compose`
 - **Cloud:** `gcloud`, `kubectl`, `aws`, `az`
 - **DevOps:** `tofu`, `ansible`
-- **Modern Utilities:** `jq`, `yq`, `bat`, `gh`, `htop`, `tldr`, `tree`
+- **Kubernetes Utilities:** `k9s`, `kubectx`, `kubens`
+- **Modern Utilities:** `jq`, `yq`, `bat`, `gh`, `htop`, `tldr`, `tree`, `nano`
+- **AI Tools:** `@google/gemini-cli`
 
 ### GUI Applications
 - **Editor:** Visual Studio Code
 - **Browser:** Google Chrome (amd64)
 
 ### System Configuration
-- **GNOME Polish:** Optimized dock position, dark mode, and performance power profile.
+- **GNOME Polish:** Optimized dock position (bottom, intellihide), dark mode, and performance power profile.
+- **Aesthetics:** Sets "Quokka Everywhere" as the default dark mode background.
 - **Display:** Disabled fractional scaling experimental features for maximum stability.
-- **Shell:** Customized Bash prompt with Git branch state tracking.
-- **Maintenance:** Automated firmware updates and system package maintenance.
+- **Shell:** Customized Bash prompt with Git branch state tracking and `$HOME/.local/bin` in PATH.
+- **Maintenance:** Automated firmware updates (`fwupdmgr`) and system package maintenance (`apt upgrade`, `autoremove`).
 
 # Hardware Awareness
-The script includes specialized logic to detect NVIDIA hardware. If found, it automatically installs the appropriate NVIDIA drivers and the NVIDIA Container Toolkit to enable GPU acceleration in Podman/Docker.
+The script includes specialized logic to detect NVIDIA hardware using `lspci`. If found, it automatically installs the appropriate NVIDIA drivers and the NVIDIA Container Toolkit to enable GPU acceleration in Podman/Docker.
+
+# Technical Architecture
+
+## Modular Helpers
+- **`add_apt_repo`**: Handles modern GPG keyring management in `/etc/apt/keyrings`, ensuring secure and clean repository additions.
+- **`execute_tool`**: A high-level wrapper that checks for binary existence before attempting installation, ensuring idempotency.
+- **`safe_gsettings_set`**: Safely modifies GNOME settings only if the schema and key exist, avoiding errors in headless or non-GNOME environments.
+- **`run_logged`**: Manages background execution with a spinner UI and detailed logging to `/tmp/ubuntu_setup_*.log`.
+
+## Environment Detection
+- **`is_container`**: Detects if the script is running inside a Docker/Podman container or a CI environment to skip hardware-specific or GUI configurations.
 
 # Building and Testing
 
@@ -48,6 +62,6 @@ podman build -t ubuntu-dev-env .
 ```
 
 # Development Conventions
-- **Modular Design:** Each tool installation or configuration step is encapsulated in a dedicated function.
+- **Modular Design:** Each tool installation or configuration step is encapsulated in a dedicated function (e.g., `install_vscode`, `configure_system`).
 - **High-Signal Output:** Major steps are logged with timestamps, and identical configurations are skipped with a yellow `[SKIP]` tag.
 - **Result Dashboard:** A clean, bulleted summary is displayed upon completion, categorized by success, skip, or environmental incompatibility.
