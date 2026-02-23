@@ -7,8 +7,8 @@ set -o pipefail
 
 # --- Globals ---
 LOG_FILE="/tmp/ubuntu_setup_$(date +%Y%m%d_%H%M%S).log"
-INSTALLED=(); SKIPPED=(); FAILED=()
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+INSTALLED=(); SKIPPED=(); FAILED=(); INCOMPATIBLE=()
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; MAGENTA='\033[0;35m'; NC='\033[0m'
 
 # --- Helpers ---
 log_info()    { echo -e "${BLUE}[INFO]${NC}  $1"; }
@@ -16,6 +16,7 @@ log_success() { echo -e "${GREEN}[OK]${NC}    $1"; }
 log_skip()    { echo -e "${YELLOW}[SKIP]${NC}  $1"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+log_incompat(){ echo -e "${MAGENTA}[N/A]${NC}   $1 (Incompatible environment)"; }
 
 print_summary() {
     local title="$1"; local color="$2"; shift 2; local items=("$@")
@@ -78,8 +79,6 @@ show_spinner() {
             local temp=${spinstr#?}; printf " [%c]  " "$spinstr"; spinstr=$temp${spinstr%"$temp"}
             sleep 0.1; printf "\b\b\b\b\b\b"
         done; printf "    \b\b\b\b"
-    else
-        wait "$pid"
     fi
 }
 
@@ -91,7 +90,8 @@ run_logged() {
     printf "${BLUE}[INFO]${NC}  $msg... "
     "$@" >> "$LOG_FILE" 2>&1 &
     local pid=$!
-    if show_spinner "$pid" && wait "$pid"; then
+    show_spinner "$pid"
+    if wait "$pid"; then
         printf "\r${GREEN}[OK]${NC}    $msg.   \n"
         return 0
     else
@@ -311,6 +311,9 @@ configure_system() {
         safe_gsettings_set "org.gnome.mutter" "experimental-features" "[]"
         safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
         safe_gsettings_set "org.gnome.desktop.background" "picture-uri-dark" "file:///usr/share/backgrounds/Quokka_Everywhere_by_Dilip.png"
+    else
+        log_incompat "GNOME Desktop settings"
+        INCOMPATIBLE+=("GNOME Desktop settings")
     fi
 
     if [ -f "$HOME/.bashrc" ]; then
@@ -385,12 +388,19 @@ main() {
         if command -v lspci >/dev/null 2>&1 && lspci | grep -iq "nvidia"; then
             execute_tool "nvidia-smi" "NVIDIA Driver" install_nvidia
         fi
+    else
+        log_incompat "NVIDIA Drivers"
+        INCOMPATIBLE+=("NVIDIA Drivers")
     fi
 
     # GUI Applications
     if [ -n "$DISPLAY" ] || [ -n "$XDG_CURRENT_DESKTOP" ]; then
         execute_tool "code"   "VS Code" install_vscode
         execute_tool "google-chrome-stable" "Chrome" install_chrome
+    else
+        log_incompat "GUI Applications (VS Code, Chrome)"
+        INCOMPATIBLE+=("VS Code")
+        INCOMPATIBLE+=("Chrome")
     fi
     
     configure_system
@@ -398,7 +408,8 @@ main() {
     echo -e "\n${GREEN}==========================================${NC}"
     log_success "Setup Complete!"
     print_summary "Installed/Configured" "$BLUE" "${INSTALLED[@]}"
-    print_summary "Skipped (Up-to-date)" "$YELLOW" "${SKIPPED[@]}"
+    print_summary "Skipped (Installed)" "$YELLOW" "${SKIPPED[@]}"
+    print_summary "Skipped (Incompatible)" "$MAGENTA" "${INCOMPATIBLE[@]}"
     print_summary "Failed" "$RED" "${FAILED[@]}"
     echo -e "\n${GREEN}==========================================${NC}"
     echo -e "Run 'source ~/.bashrc' to apply changes."
