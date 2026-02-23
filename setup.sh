@@ -109,6 +109,7 @@ install_podman() { run_quiet sudo apt-get install -y podman; }
 install_jq()     { run_quiet sudo apt-get install -y jq; }
 install_tree()   { run_quiet sudo apt-get install -y tree; }
 install_compose() { run_quiet sudo apt-get install -y podman-compose; }
+install_ansible() { run_quiet sudo apt-get install -y ansible; }
 
 install_uv() {
     curl -LsSf https://astral.sh/uv/install.sh | run_quiet sh
@@ -206,6 +207,24 @@ install_k9s() {
     rm /tmp/k9s.tar.gz
 }
 
+install_opentofu() {
+    curl -fsSL https://get.opentofu.org/opentofu.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/opentofu.gpg
+    sudo chmod 644 /etc/apt/keyrings/opentofu.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/opentofu.gpg] https://packages.opentofu.org/opentofu/main/deb/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/opentofu.list
+    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y tofu
+}
+
+install_helm() {
+    curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y helm
+}
+
+install_yq() {
+    sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+    sudo chmod +x /usr/local/bin/yq
+}
+
 # --- Configuration ---
 configure_system() {
     run_logged "Updating system and maintenance" bash -c "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get autoremove -y && sudo apt-get autoclean"
@@ -266,14 +285,20 @@ main() {
     execute_tool "htop"     "htop"           "install_htop"
     execute_tool "nano"     "nano"           "install_nano"
     execute_tool "jq"       "jq"             "install_jq"
+    execute_tool "yq"       "yq"             "install_yq"
     execute_tool "tree"     "tree"           "install_tree"
     execute_tool "bat"      "bat"            "install_bat"
     execute_tool "podman-compose" "Compose"  "install_compose"
     
+    # DevOps & IaC
+    execute_tool "tofu"     "OpenTofu"       "install_opentofu"
+    execute_tool "ansible"  "Ansible"        "install_ansible"
+
     # Cloud & Kubernetes
     execute_tool "gcloud"   "Google Cloud"   "install_gcloud"
     execute_tool "kubectl"  "kubectl"        "install_kubectl"
     execute_tool "kubectx"  "kubectx/kubens" "install_kubectx"
+    execute_tool "helm"     "Helm"           "install_helm"
     execute_tool "aws"      "AWS CLI"        "install_aws"
     execute_tool "az"       "Azure CLI"      "install_az"
     execute_tool "k9s"      "k9s"            "install_k9s"
@@ -284,7 +309,7 @@ main() {
     execute_tool "tldr"     "tldr"           "run_quiet npm install -g tldr"
 
     # Hardware Specific
-    if command -v lspci >/dev/null 2>&1 && lspci | grep -iq "nvidia"; then
+    if ! is_container && command -v lspci >/dev/null 2>&1 && lspci | grep -iq "nvidia"; then
         execute_tool "nvidia-smi" "NVIDIA Driver"  "install_nvidia_drivers"
         execute_tool "nvidia-container-cli" "NVIDIA Toolkit" "install_nvidia_toolkit"
     fi
