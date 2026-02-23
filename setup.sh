@@ -99,7 +99,8 @@ run_logged() {
         "$@" 2>&1 | tee -a "$LOG_FILE" || status=$?
     else
         printf "${BLUE}[INFO]${NC}  $msg... "
-        "$@" >> "$LOG_FILE" 2>&1 &
+        # Run in a subshell to ensure redirections and backgrounding are clean
+        ( "$@" ) >> "$LOG_FILE" 2>&1 &
         local pid=$!
         show_spinner "$pid"
         wait "$pid" || status=$?
@@ -196,10 +197,21 @@ safe_gsettings_set() {
     if ! command -v gsettings >/dev/null 2>&1; then
         return 0
     fi
-    if gsettings list-schemas | grep -q "^$schema$" && gsettings list-keys "$schema" | grep -q "^$key$"; then
-        local clean_value; clean_value=$(echo "$value" | sed "s/^@as //; s/^'//; s/'$//")
-        local current; current=$(gsettings get "$schema" "$key" | sed "s/^@as //; s/^'//; s/'$//")
-        if [ "$current" != "$clean_value" ]; then
+    
+    # Verify schema and key exist before proceeding
+    if ! gsettings range "$schema" "$key" >/dev/null 2>&1; then
+        log_warn "GSettings schema/key not found: $schema $key"
+        return 0
+    fi
+
+    # Normalize values for comparison (remove @as, quotes, etc.)
+    local clean_value; clean_value=$(echo "$value" | sed -E "s/^@[a-z]+ //; s/^'//; s/'$//")
+    local current_raw; 
+    
+    if current_raw=$(gsettings get "$schema" "$key" 2>/dev/null); then
+        local clean_current; clean_current=$(echo "$current_raw" | sed -E "s/^@[a-z]+ //; s/^'//; s/'$//")
+        
+        if [ "$clean_current" != "$clean_value" ]; then
             if run_logged "Configuring $key" gsettings set "$schema" "$key" "$value"; then
                 INSTALLED+=("$key")
             else
@@ -209,6 +221,9 @@ safe_gsettings_set() {
             log_skip "$key is already configured."
             SKIPPED+=("$key")
         fi
+    else
+        log_error "Failed to read GSetting $key from $schema. Is D-Bus running?"
+        FAILED+=("$key")
     fi
 }
 
@@ -322,39 +337,35 @@ configure_system() {
     fi
 
     if [ -n "$DISPLAY" ] && command -v gsettings >/dev/null 2>&1; then
-        if command -v powerprofilesctl >/dev/null 2>&1; then
-            if [ "$(powerprofilesctl get)" != "performance" ]; then
-                if run_logged "Setting power profile to performance" sudo powerprofilesctl set performance; then
-                    INSTALLED+=("Power Profile")
+        log_info "Environment check: DISPLAY='$DISPLAY', gsettings found."
+        if ! gsettings list-schemas >/dev/null 2>&1; then
+            log_warn "gsettings is available but cannot communicate with D-Bus. Skipping GNOME customizations."
+        else
+            log_info "Applying GNOME Desktop customizations..."
+            if command -v powerprofilesctl >/dev/null 2>&1; then
+                if [ "$(powerprofilesctl get)" != "performance" ]; then
+                    if run_logged "Setting power profile to performance" sudo powerprofilesctl set performance; then
+                        INSTALLED+=("Power Profile")
+                    else
+                        FAILED+=("Power Profile")
+                    fi
                 else
-                    FAILED+=("Power Profile")
+                    log_skip "Power profile is already set to performance."
+                    SKIPPED+=("Power Profile")
                 fi
-            else
-                log_skip "Power profile is already set to performance."
-                SKIPPED+=("Power Profile")
             fi
+            
+            safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "dock-position" "BOTTOM"
+            safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "intellihide" "true"
+            safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "dock-fixed" "false"
+            safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "extend-height" "false"
+            safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "dash-max-icon-size" "32"
+            safe_gsettings_set "org.gnome.mutter" "experimental-features" "[]"
+            safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
+            safe_gsettings_set "org.gnome.desktop.background" "picture-uri-dark" "'file:///usr/share/backgrounds/Quokka_Everywhere_by_Dilip.png'"
         fi
-        
-        local schemas; schemas=$(gsettings list-schemas)
-        local s;
-        if echo "$schemas" | grep -q "dash-to-dock"; then
-            s="org.gnome.shell.extensions.dash-to-dock"
-        elif echo "$schemas" | grep -q "ubuntu-dock"; then
-            s="org.gnome.shell.extensions.ubuntu-dock"
-        fi
-        
-        if [ -n "$s" ]; then 
-            safe_gsettings_set "$s" "dock-position" "'BOTTOM'"
-            safe_gsettings_set "$s" "intellihide" "true"
-            safe_gsettings_set "$s" "dock-fixed" "false"
-            safe_gsettings_set "$s" "extend-height" "false"
-            safe_gsettings_set "$s" "dash-max-icon-size" "32"
-        fi
-        safe_gsettings_set "org.gnome.mutter" "experimental-features" "[]"
-        safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
-        safe_gsettings_set "org.gnome.desktop.background" "picture-uri-dark" "file:///usr/share/backgrounds/Quokka_Everywhere_by_Dilip.png"
     else
-        log_incompat "GNOME Desktop settings"
+        log_incompat "GNOME Desktop settings (DISPLAY not set or gsettings missing)"
         INCOMPATIBLE+=("GNOME Desktop settings")
     fi
 
