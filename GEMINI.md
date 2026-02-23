@@ -1,41 +1,53 @@
 # Project Overview
 
-This project automates the setup of a development environment on a fresh Ubuntu installation. It uses a shell script (`setup.sh`) to install a collection of common development tools. A `Dockerfile` is also included to create a containerized version of the environment.
+This project provides a robust automation script (`setup.sh`) to transform a fresh Ubuntu installation into a professional development environment. It is designed to be idempotent, hardware-aware, and highly descriptive.
 
-The script installs the following tools:
-*   `git`: Version control system.
-*   `gh`: GitHub CLI.
-*   `uv`: Python package installer.
-*   `podman`: Container engine.
-*   `nvm`: Node Version Manager, used to install Node.js and npm.
-*   `@google/gemini-cli`: The Gemini CLI.
-*   Visual Studio Code: Code editor.
-*   `curl` and `wget`: Command-line tools for transferring data.
-*   `speedtest-cli`: Command-line interface for testing internet bandwidth.
+## Key Goals
+- **Automation:** Minimize manual configuration steps.
+- **Idempotency:** Ensure the script can be run multiple times without causing side effects or redundant operations.
+- **Portability:** Support both physical hardware (with GPU detection) and containerized testing environments.
 
-# Building and Running
+## Installed Toolchain
 
-## Running the Setup Script
+### Development Runtimes & CLI
+- **Python:** `uv` (Fast package manager)
+- **Node.js:** `nvm` with LTS version
+- **Containers:** `podman`, `podman-compose`
+- **Cloud:** `gcloud`, `kubectl`, `aws`, `az`
+- **DevOps:** `tofu`, `ansible`
+- **Modern Utilities:** `jq`, `yq`, `bat`, `gh`, `htop`, `tldr`, `tree`
 
-To set up your local environment, execute the `setup.sh` script:
+### GUI Applications
+- **Editor:** Visual Studio Code
+- **Browser:** Google Chrome (amd64)
 
+### System Configuration
+- **GNOME Polish:** Optimized dock position, dark mode, and performance power profile.
+- **Display:** Disabled fractional scaling experimental features for maximum stability.
+- **Shell:** Customized Bash prompt with Git branch state tracking.
+- **Maintenance:** Automated firmware updates and system package maintenance.
+
+# Hardware Awareness
+The script includes specialized logic to detect NVIDIA hardware. If found, it automatically installs the appropriate NVIDIA drivers and the NVIDIA Container Toolkit to enable GPU acceleration in Podman/Docker.
+
+# Building and Testing
+
+## Local Execution
+To set up your local environment:
 ```bash
+chmod +x setup.sh
 ./setup.sh
 ```
 
-The script will update the system's package lists, upgrade existing packages, and then install the tools listed above. It's recommended to restart your shell session or source your `~/.bashrc` file after the script finishes to ensure all environment changes take effect.
+## Containerized Testing
+A `Dockerfile` is provided specifically for verifying the `setup.sh` script in a headless environment. It uses a `developer` user with passwordless sudo to simulate a real-world developer machine.
 
-## Building the Docker Image
-
-A `Dockerfile` is provided to build a container image with the specified development environment.
-
-To build the image, run:
-
+To build the test environment:
 ```bash
-docker build -t ubuntu-dev-env .
+podman build -t ubuntu-dev-env .
 ```
-This `Dockerfile` is specifically designed to create an environment for testing the `setup.sh` script. The `RUN ./setup.sh` command is now active and will execute the setup script during the image build process.
 
 # Development Conventions
-
-The `setup.sh` script follows a modular structure, with separate functions for installing each tool. This makes it easy to add, remove, or modify the installation process for individual components. Each major step is logged to the console with a timestamp.
+- **Modular Design:** Each tool installation or configuration step is encapsulated in a dedicated function.
+- **High-Signal Output:** Major steps are logged with timestamps, and identical configurations are skipped with a yellow `[SKIP]` tag.
+- **Result Dashboard:** A clean, bulleted summary is displayed upon completion, categorized by success, skip, or environmental incompatibility.

@@ -4,12 +4,12 @@ A robust, idempotent shell script to automate the configuration of a professiona
 
 ## Key Features
 
-- **🚀 Modern Toolchain:** Installs a curated set of high-performance CLI tools (`uv`, `podman`, `gh`, `jq`, `bat`, etc.).
+- **🚀 Modern Toolchain:** Installs a curated set of high-performance CLI tools (`uv`, `podman`, `gh`, `jq`, `yq`, `bat`, etc.).
 - **🔧 Hardware-Aware:** Dynamically detects NVIDIA GPUs to install appropriate drivers and container toolkits.
 - **🖥️ Desktop Polish:** Configures GNOME for peak productivity (Dock, Dark Mode, Performance profiles, and Scaling).
 - **🛡️ System Maintenance:** Automates system patching, firmware updates (`fwupdmgr`), and deep cleanup (`autoremove`/`autoclean`).
 - **🐚 Shell Customization:** Enhances the Bash prompt with real-time Git branch integration.
-- **📊 Professional UX:** Provides a clean terminal experience with color-coded logging and a final status dashboard.
+- **📊 Professional UX:** Provides a clean terminal experience with color-coded logging and a readable final status dashboard.
 
 ## Quick Start
 
@@ -50,7 +50,11 @@ Alternatively, you can clone the repository and run it locally:
 *   **Containers:** `podman`, `podman-compose`
 *   **Runtime:** `nvm` (Node Version Manager) with latest LTS Node.js
 *   **AI:** `@google/gemini-cli`
-*   **Modern Utilities:** `jq`, `bat`, `tldr`, `tree`, `htop`, `nano`
+*   **Modern Utilities:** `jq`, `yq`, `bat`, `tldr`, `tree`, `htop`, `nano`
+
+### DevOps & IaC
+*   **Terraform/OpenTofu:** `tofu` (Open-source Terraform fork)
+*   **Automation:** `ansible`
 
 ### Cloud & Kubernetes
 *   **Google Cloud:** `gcloud` CLI
@@ -69,20 +73,20 @@ Alternatively, you can clone the repository and run it locally:
 
 ### Desktop Preferences (GNOME)
 *   **Dock:** Positioned at the bottom, panel mode disabled, intellihide enabled.
-*   **Display:** Forced 100% integer scaling and Preferred Dark Mode.
+*   **Display:** Preferred Dark Mode and disabled fractional scaling experimental features.
 *   **Power:** Automatically switched to the 'Performance' profile.
 
 ### Maintenance
 *   **Firmware:** Automated hardware metadata refresh and update via `fwupdmgr`.
-*   **Cleanup:** Performs `apt autoremove` and `autoclean` to maintain a lean system.
+*   **Cleanup:** Performs `apt upgrade`, `autoremove`, and `autoclean` to maintain a lean system.
 
-## Testing with Docker
+## Testing with Podman/Docker
 
 A `Dockerfile` is provided to test the setup in a clean Ubuntu 24.04 environment:
 
 ```bash
-docker build -t ubuntu-dev-env .
-docker run -it ubuntu-dev-env
+podman build -t ubuntu-dev-env .
+podman run -it ubuntu-dev-env
 ```
 
 ## License
