@@ -72,7 +72,7 @@ Alternatively, you can clone the repository and run it locally:
 ## System Configuration
 
 ### Desktop Preferences (GNOME)
-*   **Dock:** Positioned at the bottom, panel mode disabled, intellihide enabled.
+*   **Dock:** Positioned at the bottom, panel mode disabled, intellihide enabled, and icon size set to 32px.
 *   **Display:** Preferred Dark Mode and disabled fractional scaling experimental features.
 *   **Power:** Automatically switched to the 'Performance' profile.
 *   **Aesthetics:** Sets the default background to the high-quality "Quokka Everywhere" theme.
