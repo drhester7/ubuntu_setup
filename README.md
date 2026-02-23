@@ -78,7 +78,7 @@ Alternatively, you can clone the repository and run it locally:
 *   **Aesthetics:** Sets the default background to the high-quality "Quokka Everywhere" theme.
 
 ### Maintenance
-*   **Firmware:** Automated hardware metadata refresh and update via `fwupdmgr`.
+*   **Firmware:** Automated hardware metadata refresh and update via `fwupdmgr` (Only attempted on Bare Metal systems).
 *   **Cleanup:** Performs `apt upgrade`, `autoremove`, and `autoclean` to maintain a lean system.
 
 ## Testing with Podman/Docker

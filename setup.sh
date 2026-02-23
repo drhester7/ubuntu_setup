@@ -59,6 +59,15 @@ is_container() {
     return 1
 }
 
+is_bare_metal() {
+    if is_container; then return 1; fi
+    if command -v systemd-detect-virt >/dev/null 2>&1; then
+        ! systemd-detect-virt --quiet
+        return $?
+    fi
+    return 0
+}
+
 prime_sudo() {
     if ! is_container && [ -t 1 ] && [ -c /dev/tty ]; then
         if ! sudo -n true 2>/dev/null; then
@@ -326,7 +335,7 @@ configure_system() {
         FAILED+=("System Updates")
     fi
     
-    if command -v fwupdmgr >/dev/null 2>&1; then
+    if is_bare_metal && command -v fwupdmgr >/dev/null 2>&1; then
         run_quiet sudo fwupdmgr refresh --force || true
         if sudo fwupdmgr get-updates >> "$LOG_FILE" 2>&1; then
             if run_logged "Applying firmware updates" sudo fwupdmgr update -y; then INSTALLED+=("Firmware"); else FAILED+=("Firmware"); fi
@@ -334,6 +343,9 @@ configure_system() {
             log_skip "Firmware is already up to date."
             SKIPPED+=("Firmware")
         fi
+    elif ! is_bare_metal; then
+        log_incompat "Firmware Updates"
+        INCOMPATIBLE+=("Firmware Updates")
     fi
 
     if [ -n "$DISPLAY" ] && command -v gsettings >/dev/null 2>&1; then
