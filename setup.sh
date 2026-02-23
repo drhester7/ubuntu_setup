@@ -42,10 +42,11 @@ is_container() {
 }
 
 prime_sudo() {
-    if ! is_container && [ -t 0 ]; then
+    if ! is_container && [ -t 1 ]; then
         if ! sudo -n true 2>/dev/null; then
             log_warn "Sudo privileges required. Please enter your password:"
-            sudo -v || return 1
+            # Redirect from /dev/tty ensures this works even when script is piped (curl | bash)
+            sudo -v < /dev/tty || return 1
         fi
     fi
     return 0
@@ -85,7 +86,11 @@ execute_tool() {
     if command -v "$bin" >/dev/null 2>&1; then
         log_info "$name is already installed."; SKIPPED+=("$name")
     else
-        run_logged "Installing $name" $func && INSTALLED+=("$name") || FAILED+=("$name")
+        if run_logged "Installing $name" $func; then
+            INSTALLED+=("$name")
+        else
+            FAILED+=("$name")
+        fi
     fi
 }
 
@@ -247,7 +252,7 @@ main() {
     [ ${#SKIPPED[@]} -gt 0 ]   && echo -e "${YELLOW}Skipped:${NC}   ${SKIPPED[*]}"
     [ ${#FAILED[@]} -gt 0 ]    && echo -e "${RED}Failed:${NC}    ${FAILED[*]}"
     echo -e "${GREEN}==========================================${NC}"
-    echo -e "Run 'source ~/.bashrc' to apply shell changes."
+    echo -e "Run 'source ~/.bashrc' to apply changes."
 }
 
 main "$@"
