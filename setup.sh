@@ -329,7 +329,7 @@ install_nvidia() {
 
 # --- Configuration ---
 configure_system() {
-    if run_logged "Updating system and maintenance" bash -c "sudo apt-get upgrade -y && sudo apt-get autoremove -y && sudo apt-get autoclean"; then
+    if run_logged "Updating system and maintenance" bash -c "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get autoremove -y && sudo apt-get autoclean"; then
         INSTALLED+=("System Updates")
     else
         FAILED+=("System Updates")
@@ -414,13 +414,10 @@ main() {
 
     touch "$LOG_FILE"; echo -e "${BLUE}=== Ubuntu Setup ===${NC}\nLogs: $LOG_FILE"
     if [ "$VERBOSE" = true ]; then log_info "Verbose mode enabled."; fi
-    
-    if is_container; then
-        run_logged "Initializing container environment" sudo apt-get update
-    else
-        prime_sudo
-        keep_sudo_alive & SUDO_ALIVE_PID=$!
-    fi
+
+    prime_sudo
+    keep_sudo_alive & SUDO_ALIVE_PID=$!
+    configure_system
 
     source_nvm
     export PATH="$HOME/.local/bin:$PATH"
@@ -476,8 +473,6 @@ main() {
         INCOMPATIBLE+=("VS Code")
         INCOMPATIBLE+=("Chrome")
     fi
-    
-    configure_system
 
     echo -e "\n${GREEN}==========================================${NC}"
     log_success "Setup Complete!"
