@@ -12,6 +12,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC
 # --- Helpers ---
 log_info()    { echo -e "${BLUE}[INFO]${NC}  $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC}    $1"; }
+log_skip()    { echo -e "${YELLOW}[SKIP]${NC}  $1"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
@@ -84,7 +85,7 @@ execute_tool() {
     local bin="$1" name="$2" func="$3"
     [[ "$bin" =~ ^(nvm|npm|node|gemini|tldr)$ ]] && source_nvm
     if command -v "$bin" >/dev/null 2>&1; then
-        log_info "$name is already installed."; SKIPPED+=("$name")
+        log_skip "$name is already installed."; SKIPPED+=("$name")
     else
         if run_logged "Installing $name" $func; then
             INSTALLED+=("$name")
@@ -97,7 +98,17 @@ execute_tool() {
 safe_gsettings_set() {
     local schema="$1" key="$2" value="$3"
     if gsettings list-schemas | grep -q "^$schema$" && gsettings list-keys "$schema" | grep -q "^$key$"; then
-        log_info "Configuring $key..."; run_quiet gsettings set "$schema" "$key" "$value"
+        local clean_value; clean_value=$(echo "$value" | sed "s/^@as //; s/^'//; s/'$//")
+        local current; current=$(gsettings get "$schema" "$key" | sed "s/^@as //; s/^'//; s/'$//")
+        if [ "$current" != "$clean_value" ]; then
+            if run_logged "Configuring $key" gsettings set "$schema" "$key" "$value"; then
+                INSTALLED+=("$key")
+            else
+                FAILED+=("$key")
+            fi
+        else
+            log_skip "$key is already configured."; SKIPPED+=("$key")
+        fi
     fi
 }
 
@@ -225,19 +236,42 @@ install_yq() {
 
 # --- Configuration ---
 configure_system() {
-    run_logged "Updating system and maintenance" bash -c "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get autoremove -y && sudo apt-get autoclean"
+    if run_logged "Updating system and maintenance" bash -c "sudo apt-get upgrade -y && sudo apt-get autoremove -y && sudo apt-get autoclean"; then
+        INSTALLED+=("System Updates")
+    else
+        FAILED+=("System Updates")
+    fi
     
     if command -v fwupdmgr >/dev/null 2>&1; then
         run_quiet sudo fwupdmgr refresh --force || true
         if sudo fwupdmgr get-updates >> "$LOG_FILE" 2>&1; then
-            run_logged "Applying firmware updates" sudo fwupdmgr update -y
+            if run_logged "Applying firmware updates" sudo fwupdmgr update -y; then
+                INSTALLED+=("Firmware")
+            else
+                FAILED+=("Firmware")
+            fi
+        else
+            log_skip "Firmware is already up to date."; SKIPPED+=("Firmware")
         fi
     fi
 
     if [ -n "$DISPLAY" ]; then
-        command -v powerprofilesctl >/dev/null 2>&1 && run_quiet sudo powerprofilesctl set performance
-        local s; gsettings list-schemas | grep -q "dash-to-dock" && s="org.gnome.shell.extensions.dash-to-dock"
-        [ -z "$s" ] && gsettings list-schemas | grep -q "ubuntu-dock" && s="org.gnome.shell.extensions.ubuntu-dock"
+        if command -v powerprofilesctl >/dev/null 2>&1; then
+            if [ "$(powerprofilesctl get)" != "performance" ]; then
+                if run_logged "Setting power profile to performance" sudo powerprofilesctl set performance; then
+                    INSTALLED+=("Power Profile")
+                else
+                    FAILED+=("Power Profile")
+                fi
+            else
+                log_skip "Power profile is already set to performance."; SKIPPED+=("Power Profile")
+            fi
+        fi
+        
+        local schemas; schemas=$(gsettings list-schemas)
+        local s; echo "$schemas" | grep -q "dash-to-dock" && s="org.gnome.shell.extensions.dash-to-dock"
+        [ -z "$s" ] && echo "$schemas" | grep -q "ubuntu-dock" && s="org.gnome.shell.extensions.ubuntu-dock"
+        
         if [ -n "$s" ]; then 
             safe_gsettings_set "$s" "dock-position" "'BOTTOM'"
             safe_gsettings_set "$s" "intellihide" "true"
@@ -249,15 +283,23 @@ configure_system() {
         safe_gsettings_set "org.gnome.desktop.background" "picture-uri-dark" "file:///usr/share/backgrounds/Quokka_Everywhere_by_Dilip.png"
     fi
 
-    if [ -f "$HOME/.bashrc" ] && ! grep -q "GIT_PS1_SHOWDIRTYSTATE" "$HOME/.bashrc"; then
-        cat << 'EOF' >> "$HOME/.bashrc"
+    if [ -f "$HOME/.bashrc" ]; then
+        if ! grep -q "GIT_PS1_SHOWDIRTYSTATE" "$HOME/.bashrc"; then
+            if run_logged "Configuring bash prompt" bash -c "cat << 'EOF' >> \"$HOME/.bashrc\"
 if [ -f /usr/lib/git-core/git-sh-prompt ]; then
     . /usr/lib/git-core/git-sh-prompt
     export GIT_PS1_SHOWDIRTYSTATE=1
-    export PS1='${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[01;33m\]$(__git_ps1 " (%s)")\[\033[00m\]\$ '
+    export PS1='\${debian_chroot:+(\$debian_chroot)}\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[01;33m\\]\$(__git_ps1 \" (%s)\")\\[\\033[00m\]\\$ '
 fi
-export PATH="$HOME/.local/bin:$PATH"
-EOF
+export PATH=\"\$HOME/.local/bin:\$PATH\"
+EOF"; then
+                INSTALLED+=("Bash Prompt")
+            else
+                FAILED+=("Bash Prompt")
+            fi
+        else
+            log_skip "Bash prompt is already configured."; SKIPPED+=("Bash Prompt")
+        fi
     fi
 }
 
@@ -301,7 +343,6 @@ main() {
     execute_tool "k9s"      "k9s"            "install_k9s"
 
     # Node tools
-    source_nvm
     execute_tool "gemini"   "Gemini CLI"     "run_quiet npm install -g @google/gemini-cli"
     execute_tool "tldr"     "tldr"           "run_quiet npm install -g tldr"
 
