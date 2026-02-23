@@ -348,6 +348,7 @@ configure_system() {
             safe_gsettings_set "$s" "intellihide" "true"
             safe_gsettings_set "$s" "dock-fixed" "false"
             safe_gsettings_set "$s" "extend-height" "false"
+            safe_gsettings_set "$s" "dash-max-icon-size" "32"
         fi
         safe_gsettings_set "org.gnome.mutter" "experimental-features" "[]"
         safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
