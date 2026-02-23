@@ -17,6 +17,14 @@ log_skip()    { echo -e "${YELLOW}[SKIP]${NC}  $1"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
+print_summary() {
+    local title="$1"; local color="$2"; shift 2; local items=("$@")
+    if [ ${#items[@]} -gt 0 ]; then
+        echo -e "\n${color}${title}:${NC}"
+        printf "  - %s\n" "${items[@]}"
+    fi
+}
+
 on_failure() {
     local exit_code=$?
     if [ $exit_code -ne 0 ] && [ $exit_code -ne 130 ]; then
@@ -365,7 +373,7 @@ main() {
     execute_tool "kubectl"  "kubectl"        install_kubectl
     execute_tool "kubectx"  "kubectx/kubens" install_kubectx
     execute_tool "aws"      "AWS CLI"        install_aws
-    execute_tool "az"       "Azure CLI"      "install_az"
+    execute_tool "az"       "Azure CLI"      install_az
     execute_tool "k9s"      "k9s"            install_k9s
 
     # Node tools
@@ -389,10 +397,10 @@ main() {
 
     echo -e "\n${GREEN}==========================================${NC}"
     log_success "Setup Complete!"
-    [ ${#INSTALLED[@]} -gt 0 ] && echo -e "${BLUE}Installed/Configured:${NC} ${INSTALLED[*]}"
-    [ ${#SKIPPED[@]} -gt 0 ]   && echo -e "${YELLOW}Skipped (Up-to-date):${NC} ${SKIPPED[*]}"
-    [ ${#FAILED[@]} -gt 0 ]    && echo -e "${RED}Failed:${NC}               ${FAILED[*]}"
-    echo -e "${GREEN}==========================================${NC}"
+    print_summary "Installed/Configured" "$BLUE" "${INSTALLED[@]}"
+    print_summary "Skipped (Up-to-date)" "$YELLOW" "${SKIPPED[@]}"
+    print_summary "Failed" "$RED" "${FAILED[@]}"
+    echo -e "\n${GREEN}==========================================${NC}"
     echo -e "Run 'source ~/.bashrc' to apply changes."
 }
 
