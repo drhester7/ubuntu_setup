@@ -1,17 +1,30 @@
-FROM ubuntu:latest
+FROM ubuntu:24.04
 
 # Avoid prompts from apt
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=America/New_York
 
-# Update and install dependencies as root
-RUN apt-get update && apt-get install -y sudo tzdata
+# Install sudo and minimal requirements for the script to initiate
+RUN apt-get update && apt-get install -y \
+    sudo \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy the setup script
-COPY setup.sh /setup/setup.sh
+# Create a 'developer' user and enable passwordless sudo
+RUN useradd -m -s /bin/bash developer && \
+    echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Make the script executable
-RUN chmod +x /setup/setup.sh
+USER developer
+WORKDIR /home/developer/setup
+
+# Copy the setup script with correct ownership
+COPY --chown=developer:developer setup.sh .
 
 # Run the setup script
-RUN /setup/setup.sh --no-gui
+# GUI tools and desktop configurations will be skipped automatically 
+# as no $DISPLAY environment variable is present during build.
+RUN chmod +x setup.sh && ./setup.sh
+
+# Final environment settings
+WORKDIR /home/developer
+CMD ["/bin/bash"]

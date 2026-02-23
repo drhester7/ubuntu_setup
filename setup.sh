@@ -1,386 +1,253 @@
 #!/bin/bash
-#
-# This script configures a development environment on Ubuntu.
+# Professional Ubuntu Development Environment Setup
+# High-signal, idempotent, and Docker-aware automation.
 
 set -e
 
-TEMP_FILES=()
+# --- Globals ---
+LOG_FILE="/tmp/ubuntu_setup_$(date +%Y%m%d_%H%M%S).log"
+INSTALLED=(); SKIPPED=(); FAILED=()
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+
+# --- Helpers ---
+log_info()    { echo -e "${BLUE}[INFO]${NC}  $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC}    $1"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+
+on_failure() {
+    local exit_code=$?
+    if [ $exit_code -ne 0 ] && [ $exit_code -ne 130 ]; then
+        echo -e "\n${RED}!!! Installation Failed (Exit Code: $exit_code) !!!${NC}"
+        if [ -f "$LOG_FILE" ]; then
+            echo -e "${YELLOW}--- Verbose Log Output (from $LOG_FILE) ---${NC}"
+            cat "$LOG_FILE"
+            echo -e "${YELLOW}--- End of Log ---${NC}"
+        fi
+    fi
+}
+
 cleanup() {
-    log "Cleaning up..."
-    if [ -n "$SUDO_ALIVE_PID" ]; then
-        kill "$SUDO_ALIVE_PID" 2>/dev/null
-    fi
-    if [ ${#TEMP_FILES[@]} -gt 0 ]; then
-        rm -f "${TEMP_FILES[@]}"
-    fi
+    [ -n "$SUDO_ALIVE_PID" ] && kill "$SUDO_ALIVE_PID" 2>/dev/null || true
 }
-trap cleanup EXIT
+trap "on_failure; cleanup" EXIT
 
-# Function to keep sudo timestamp alive
 keep_sudo_alive() {
-    while true; do
-        sudo -n -v 2>/dev/null || true
-        sleep 60
-    done
+    while true; do sudo -n -v 2>/dev/null || true; sleep 60; done
 }
 
-log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+# Detect if running in a non-interactive environment or container
+is_container() {
+    [ -f /.dockerenv ] || grep -qE "docker|podman|containerd" /proc/1/cgroup 2>/dev/null
 }
 
-# patch
-
-patch() {
-    log "patching host..."
-    sudo apt update && sudo apt upgrade -y
-    sudo apt autoremove -y
-    sudo apt autoclean
-}
-
-# Function to detect if running in a GUI environment
-is_gui_environment() {
-    # Check if a display is available (active GUI session)
-#    if [ -n "$DISPLAY" ]; then
-#        return 0
-#    fi
-    # Check if we are in a desktop session (e.g. Wayland or headless but with session)
-#    if [ -n "$XDG_CURRENT_DESKTOP" ]; then
-#        return 0
-#    fi
-    # Fallback to checking the system default target
-    if systemctl get-default 2>/dev/null | grep -q "graphical.target"; then
-        return 0
+prime_sudo() {
+    if ! is_container && [ -t 0 ]; then
+        if ! sudo -n true 2>/dev/null; then
+            log_warn "Sudo privileges required. Please enter your password:"
+            sudo -v || return 1
+        fi
     fi
-    return 1
+    return 0
 }
 
+run_quiet() { "$@" >> "$LOG_FILE" 2>&1; }
 
-# Helper function for installing APT packages
-install_apt_pkg() {
-    local cmd="$1"
-    local pkg="$2"
-    if command -v "$cmd" >/dev/null 2>&1; then
-        log "$pkg is already installed."
-    else
-        log "Installing $pkg..."
-        sudo apt-get install -y "$pkg"
-    fi
+show_spinner() {
+    local pid=$1; local spinstr='|/-\'
+    if [ -t 1 ]; then
+        while kill -0 "$pid" 2>/dev/null; do
+            local temp=${spinstr#?}; printf " [%c]  " "$spinstr"; spinstr=$temp${spinstr%"$temp"}
+            sleep 0.1; printf "\b\b\b\b\b\b"
+        done; printf "    \b\b\b\b"
+    else wait "$pid"; fi
 }
 
-# Function to install curl
-install_curl() {
-    install_apt_pkg "curl" "curl"
+run_logged() {
+    local msg="$1"; shift; [[ "$*" == *"sudo"* ]] && prime_sudo
+    printf "${BLUE}[INFO]${NC}  $msg... "
+    "$@" >> "$LOG_FILE" 2>&1 &
+    show_spinner $!; wait $! && (printf "\r${GREEN}[OK]${NC}    $msg.   \n"; return 0) || (printf "\r${RED}[ERROR]${NC} $msg. Check $LOG_FILE\n"; return 1)
 }
 
-# Function to install wget
-install_wget() {
-    install_apt_pkg "wget" "wget"
-}
-
-# Function to install git
-install_git() {
-    install_apt_pkg "git" "git"
-}
-
-install_uv() {
-    if command -v uv >/dev/null 2>&1; then
-        log "uv is already installed"
-    else
-        log "Installing uv..."
-        install_curl
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-    fi
-}
-
-# Function to install podman
-install_podman() {
-    install_apt_pkg "podman" "podman"
-}
-
-# Function to install nvm
-install_nvm() {
+source_nvm() {
     export NVM_DIR="$HOME/.nvm"
-
-    # Try to source nvm if it exists
     if [ -s "$NVM_DIR/nvm.sh" ]; then
-        log "Sourcing nvm..."
         \. "$NVM_DIR/nvm.sh"
         [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
     fi
+    return 0
+}
 
-    if command -v nvm >/dev/null 2>&1; then
-        log "nvm is already installed and sourced."
+execute_tool() {
+    local bin="$1" name="$2" func="$3"
+    [[ "$bin" =~ ^(nvm|npm|node|gemini|tldr)$ ]] && source_nvm
+    if command -v "$bin" >/dev/null 2>&1; then
+        log_info "$name is already installed."; SKIPPED+=("$name")
     else
-        log "Installing nvm..."
-        install_curl
-        # Dynamically get the latest version
-        local LATEST_NVM_VERSION
-        LATEST_NVM_VERSION=$(curl -s "https://api.github.com/repos/nvm-sh/nvm/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        if [ -z "$LATEST_NVM_VERSION" ]; then
-            log "Could not fetch latest nvm version, using a fallback."
-            LATEST_NVM_VERSION="v0.39.7" # A recent, known-good version
-        fi
-        log "Latest nvm version is $LATEST_NVM_VERSION"
-        curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$LATEST_NVM_VERSION/install.sh" | bash
-
-        # Sourcing after fresh install
-        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-    fi
-
-    # Ensure Node.js is installed and active
-    if ! command -v node >/dev/null 2>&1; then
-        log "Installing latest Node.js via nvm..."
-        nvm install --lts
-        nvm use --lts
-    else
-        log "Node.js is already available: $(node -v)"
+        run_logged "Installing $name" $func && INSTALLED+=("$name") || FAILED+=("$name")
     fi
 }
 
-# Function to install gh
+safe_gsettings_set() {
+    local schema="$1" key="$2" value="$3"
+    if gsettings list-schemas | grep -q "^$schema$" && gsettings list-keys "$schema" | grep -q "^$key$"; then
+        log_info "Configuring $key..."; run_quiet gsettings set "$schema" "$key" "$value"
+    fi
+}
+
+# --- Installers ---
+install_git()    { run_quiet sudo apt-get install -y git; }
+install_htop()   { run_quiet sudo apt-get install -y htop; }
+install_nano()   { run_quiet sudo apt-get install -y nano; }
+install_podman() { run_quiet sudo apt-get install -y podman; }
+install_jq()     { run_quiet sudo apt-get install -y jq; }
+install_tree()   { run_quiet sudo apt-get install -y tree; }
+install_compose() { run_quiet sudo apt-get install -y podman-compose; }
+
+install_uv() {
+    curl -LsSf https://astral.sh/uv/install.sh | run_quiet sh
+}
+
+install_bat() {
+    run_quiet sudo apt-get install -y bat
+    mkdir -p "$HOME/.local/bin"
+    ln -sf /usr/bin/batcat "$HOME/.local/bin/bat"
+}
+
+install_nvm() {
+    local v; v=$(basename "$(curl -Ls -o /dev/null -w "%{url_effective}" https://github.com/nvm-sh/nvm/releases/latest)")
+    curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/${v:-v0.39.7}/install.sh" | run_quiet bash
+    source_nvm; ! command -v node >/dev/null 2>&1 && run_quiet nvm install --lts
+}
+
 install_gh() {
-    if command -v gh >/dev/null 2>&1; then
-        log "gh is already installed."
-    else
-        log "Installing gh..."
-
-        install_wget
-	    sudo mkdir -p -m 755 /etc/apt/keyrings
-        wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
-	    sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-	    sudo mkdir -p -m 755 /etc/apt/sources.list.d
-	    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-	    sudo apt update
-	    sudo apt install gh -y
-    fi
-    log "To authenticate run 'gh auth login'"
+    sudo mkdir -p -m 755 /etc/apt/keyrings
+    wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y gh
 }
 
-# Function to install vscode
 install_vscode() {
-    if command -v code >/dev/null 2>&1; then
-        log "vscode is already installed."
-    else
-        log "Installing vscode..."
-
-        install_wget
-        sudo apt-get install gpg -y
-        local gpg_file
-        gpg_file=$(mktemp)
-        TEMP_FILES+=("$gpg_file")
-        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > "$gpg_file"
-        sudo install -D -o root -g root -m 644 "$gpg_file" /usr/share/keyrings/microsoft.gpg
-
-        echo "Types: deb
+    wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /usr/share/keyrings/microsoft.gpg > /dev/null
+    echo "Types: deb
 URIs: https://packages.microsoft.com/repos/code
 Suites: stable
 Components: main
 Architectures: amd64,arm64,armhf
 Signed-By: /usr/share/keyrings/microsoft.gpg" | sudo tee /etc/apt/sources.list.d/vscode.sources > /dev/null
-
-
-        sudo apt install apt-transport-https -y
-        sudo apt update
-        sudo apt install code -y
-    fi
+    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y code
 }
 
-# Function to install gemini-cli
-install_gemini_cli() {
-    if command -v gemini >/dev/null 2>&1; then
-        log "gemini-cli is already installed."
-    else
-        log "Installing gemini-cli..."
-        install_nvm
-        # We expect nvm to be sourced in the main function's scope by now
-        npm install -g @google/gemini-cli
-    fi
-}
-
-# Function to install google chrome
 install_chrome() {
-    if command -v google-chrome-stable >/dev/null 2>&1; then
-        log "Google Chrome is already installed."
-    else
-        log "Installing google chrome..."
-        local CHROME_DEB
-        CHROME_DEB=$(mktemp --suffix=.deb)
-        TEMP_FILES+=("$CHROME_DEB") # Register for cleanup
-
-        wget -O "$CHROME_DEB" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-        sudo apt install "$CHROME_DEB"
-    fi        
+    if [ "$(dpkg --print-architecture)" == "amd64" ]; then
+        wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        run_quiet sudo apt-get install -y /tmp/chrome.deb && rm /tmp/chrome.deb
+    else return 1; fi
 }
 
-# Function to install nano
-install_nano() {
-    install_apt_pkg "nano" "nano"
+install_nvidia_drivers() {
+    run_quiet sudo apt-get install -y ubuntu-drivers-common && run_quiet sudo ubuntu-drivers install
 }
 
-# Function to install kerberos
-install_kerberos() {
-    if command -v krb5-config >/dev/null 2>&1; then
-        log "kerberos is already installed."
-    else
-        log "Installing kerberos..."
-        sudo apt install libkrb5-dev krb5-user gcc -y
+install_nvidia_toolkit() {
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+        sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+        sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y nvidia-container-toolkit
+}
+
+# --- Configuration ---
+configure_system() {
+    run_logged "Updating system and maintenance" bash -c "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get autoremove -y && sudo apt-get autoclean"
+    
+    if command -v fwupdmgr >/dev/null 2>&1; then
+        run_quiet sudo fwupdmgr refresh --force || true
+        if sudo fwupdmgr get-updates >> "$LOG_FILE" 2>&1; then
+            run_logged "Applying firmware updates" sudo fwupdmgr update -y
+        fi
+    fi
+
+    if [ -n "$DISPLAY" ]; then
+        command -v powerprofilesctl >/dev/null 2>&1 && run_quiet sudo powerprofilesctl set performance
+        local s; gsettings list-schemas | grep -q "dash-to-dock" && s="org.gnome.shell.extensions.dash-to-dock"
+        [ -z "$s" ] && gsettings list-schemas | grep -q "ubuntu-dock" && s="org.gnome.shell.extensions.ubuntu-dock"
+        if [ -n "$s" ]; then 
+            safe_gsettings_set "$s" "dock-position" "'BOTTOM'"
+            safe_gsettings_set "$s" "intellihide" "true"
+            safe_gsettings_set "$s" "dock-fixed" "false"
+            safe_gsettings_set "$s" "extend-height" "false"
+        fi
+        safe_gsettings_set "org.gnome.desktop.interface" "scaling-factor" "1"
+        safe_gsettings_set "org.gnome.desktop.interface" "text-scaling-factor" "1.0"
+        safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
+    fi
+
+    if [ -f "$HOME/.bashrc" ] && ! grep -q "GIT_PS1_SHOWDIRTYSTATE" "$HOME/.bashrc"; then
+        cat << 'EOF' >> "$HOME/.bashrc"
+if [ -f /usr/lib/git-core/git-sh-prompt ]; then
+    . /usr/lib/git-core/git-sh-prompt
+    export GIT_PS1_SHOWDIRTYSTATE=1
+    export PS1='${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[01;33m\]$(__git_ps1 " (%s)")\[\033[00m\]\$ '
+fi
+export PATH="$HOME/.local/bin:$PATH"
+EOF
     fi
 }
 
-# Function to install htop
-install_htop() {
-    install_apt_pkg "htop" "htop"
-}
-
-# Function to detect if NVIDIA hardware is present
-has_nvidia_hardware() {
-    # Ensure pciutils is installed for lspci
-    if ! command -v lspci >/dev/null 2>&1; then
-        sudo apt-get install -y pciutils >/dev/null 2>&1
-    fi
-
-    if lspci | grep -iq "nvidia"; then
-        return 0 # True, NVIDIA GPU detected
-    else
-        return 1 # False, no NVIDIA GPU found
-    fi
-}
-
-# Function to install nvidia server driver
-install_nvidia_server_driver() {
-    if command -v nvidia-smi >/dev/null 2>&1; then
-        log "NVIDIA driver is already installed."
-    elif has_nvidia_hardware; then
-        log "Installing latest NVIDIA server driver..."
-        sudo apt-get install ubuntu-drivers-common -y
-        sudo ubuntu-drivers install
-    else
-        log "No NVIDIA hardware detected. Skipping driver installation."
-    fi
-}
-
-# Function to install nvidia-container-toolkit
-install_nvidia_container_toolkit() {
-    if command -v nvidia-container-cli >/dev/null 2>&1; then
-        log "nvidia-container-toolkit is already installed."
-    elif has_nvidia_hardware; then
-        log "Installing nvidia-container-toolkit..."
-        install_curl
-        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
-        && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
-            sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-            sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-        sudo apt-get update
-        sudo apt-get install -y nvidia-container-toolkit
-    else
-        log "No NVIDIA hardware detected. Skipping nvidia-container-toolkit installation."
-    fi
-}
-
-
-# Function to set Dash to Dock, power, and display settings
-configure_desktop_environment() {
-    log "Applying Dash to Dock, power, and display settings..."
-
-    # Dash to Dock settings
-    if gsettings list-schemas | grep -q "org.gnome.shell.extensions.ubuntu-dock"; then
-        SCHEMA="org.gnome.shell.extensions.ubuntu-dock"
-        log "Using schema: $SCHEMA"
-        gsettings set "$SCHEMA" dock-position 'BOTTOM'
-        gsettings set "$SCHEMA" intellihide true
-        gsettings set "$SCHEMA" dock-fixed false
-        log "Dash to Dock settings applied."
-    else
-        log "Dash to Dock (Ubuntu Dock) schema not found. Skipping dock settings."
-        log "Please ensure 'org.gnome.shell.extensions.ubuntu-dock' is installed."
-    fi
-
-    # Set power profile to performance
-    if gsettings list-schemas | grep -q "org.gnome.settings-daemon.plugins.power"; then
-        log "Setting power profile to performance..."
-        gsettings set org.gnome.settings-daemon.plugins.power power-profile 'performance'
-        log "Power profile set to performance."
-    else
-        log "GNOME power settings schema not found. Skipping power profile setting."
-    fi
-
-    # Set display scaling to 100% and dark mode
-    if gsettings list-schemas | grep -q "org.gnome.desktop.interface"; then
-        log "Setting display scaling to 100%..."
-        gsettings set org.gnome.desktop.interface scaling-factor 1
-        log "Display scaling set to 100%."
-
-        log "Setting dark mode..."
-        gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
-        log "Dark mode set."
-    else
-        log "GNOME desktop interface schema not found. Skipping display scaling and dark mode settings."
-    fi
-}
-
-
-
-# Main function
+# --- Main ---
 main() {
-    # Refresh sudo timestamp at the start
-    log "Requesting administrator privileges..."
-    sudo -v
+    touch "$LOG_FILE"; echo -e "${BLUE}=== Ubuntu Setup ===${NC}\nLogs: $LOG_FILE"
+    
+    if ! is_container; then
+        prime_sudo; keep_sudo_alive & SUDO_ALIVE_PID=$!
+    fi
 
-    # Keep sudo alive in the background
-    keep_sudo_alive &
-    SUDO_ALIVE_PID=$!
+    source_nvm
+    export PATH="$HOME/.local/bin:$PATH"
 
-    local cli_tools=(
-        "git"
-        "gh"
-        "uv"
-        "podman"
-        "gemini_cli"
-        "htop"
-        "nvidia_server_driver"
-        "nvidia_container_toolkit"
-        "nano"
-        #"kerberos"
-    )
+    run_logged "Ensuring base requirements" bash -c "sudo apt-get update && sudo apt-get install -y curl wget gpg pciutils build-essential"
 
-    local gui_tools=(
-        "vscode"
-        "chrome"
-    )
+    # CLI Toolchain
+    execute_tool "git"      "Git"            "install_git"
+    execute_tool "gh"       "GitHub CLI"     "install_gh"
+    execute_tool "uv"       "uv"             "install_uv"
+    execute_tool "podman"   "Podman"         "install_podman"
+    execute_tool "nvm"      "nvm/Node"       "install_nvm"
+    execute_tool "htop"     "htop"           "install_htop"
+    execute_tool "nano"     "nano"           "install_nano"
+    execute_tool "jq"       "jq"             "install_jq"
+    execute_tool "tree"     "tree"           "install_tree"
+    execute_tool "bat"      "bat"            "install_bat"
+    execute_tool "podman-compose" "Compose"  "install_compose"
+    
+    # Node tools
+    source_nvm
+    execute_tool "gemini"   "Gemini CLI"     "run_quiet npm install -g @google/gemini-cli"
+    execute_tool "tldr"     "tldr"           "run_quiet npm install -g tldr"
 
-    local gui_config=(
-        "desktop_environment"
-    )
+    # Hardware Specific
+    if command -v lspci >/dev/null 2>&1 && lspci | grep -iq "nvidia"; then
+        execute_tool "nvidia-smi" "NVIDIA Driver"  "install_nvidia_drivers"
+        execute_tool "nvidia-container-cli" "NVIDIA Toolkit" "install_nvidia_toolkit"
+    fi
 
-    patch
-
-    log "Installing CLI tools..."
-    for tool in "${cli_tools[@]}"; do
-        "install_${tool}"
-    done
-
-    if is_gui_environment; then
-        log "Installing GUI applications..."
-        for tool in "${gui_tools[@]}"; do
-            "install_${tool}"
-        done
-        
-        log "Configuring desktop..."
-        for setting in "${gui_config[@]}"; do
-            "configure_${setting}"
-        done
+    # GUI Applications
+    if [ -n "$DISPLAY" ] || [ -n "$XDG_CURRENT_DESKTOP" ]; then
+        execute_tool "code"   "VS Code" "install_vscode"
+        execute_tool "google-chrome-stable" "Chrome" "install_chrome"
     fi
     
+    configure_system
 
-    log "Setup complete! All tools have been installed."
-    
-    local shell_config="$HOME/.bashrc"
-    [[ "$SHELL" == *"zsh"* ]] && shell_config="$HOME/.zshrc"
-
-    log "To apply all changes (like nvm and gemini-cli) in this shell session, run:"
-    log "  source $shell_config"
-    log "Alternatively, you can start a fresh session by running: exec $SHELL"
+    echo -e "\n${GREEN}==========================================${NC}"
+    log_success "Setup Complete!"
+    [ ${#INSTALLED[@]} -gt 0 ] && echo -e "${BLUE}Installed:${NC} ${INSTALLED[*]}"
+    [ ${#SKIPPED[@]} -gt 0 ]   && echo -e "${YELLOW}Skipped:${NC}   ${SKIPPED[*]}"
+    [ ${#FAILED[@]} -gt 0 ]    && echo -e "${RED}Failed:${NC}    ${FAILED[*]}"
+    echo -e "${GREEN}==========================================${NC}"
+    echo -e "Run 'source ~/.bashrc' to apply shell changes."
 }
 
 main "$@"
