@@ -208,16 +208,14 @@ install_k9s() {
 }
 
 install_opentofu() {
-    curl -fsSL https://get.opentofu.org/opentofu.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/opentofu.gpg
-    sudo chmod 644 /etc/apt/keyrings/opentofu.gpg
-    echo "deb [signed-by=/etc/apt/keyrings/opentofu.gpg] https://packages.opentofu.org/opentofu/main/deb/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/opentofu.list
-    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y tofu
-}
-
-install_helm() {
-    curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
-    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y helm
+    # Download the installer script:
+    curl --proto '=https' --tlsv1.2 -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
+    # Give it execution permissions:
+    chmod +x install-opentofu.sh
+    # Run the installer:
+    ./install-opentofu.sh --install-method deb
+    # Remove the installer:
+    rm -f install-opentofu.sh
 }
 
 install_yq() {
@@ -249,6 +247,7 @@ configure_system() {
         safe_gsettings_set "org.gnome.desktop.interface" "scaling-factor" "1"
         safe_gsettings_set "org.gnome.desktop.interface" "text-scaling-factor" "1.0"
         safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
+        safe_gsettings_set "org.gnome.desktop.background" "picture-uri-dark" "file:///usr/share/backgrounds/Quokka_Everywhere_by_Dilip.png"
     fi
 
     if [ -f "$HOME/.bashrc" ] && ! grep -q "GIT_PS1_SHOWDIRTYSTATE" "$HOME/.bashrc"; then
@@ -298,7 +297,6 @@ main() {
     execute_tool "gcloud"   "Google Cloud"   "install_gcloud"
     execute_tool "kubectl"  "kubectl"        "install_kubectl"
     execute_tool "kubectx"  "kubectx/kubens" "install_kubectx"
-    execute_tool "helm"     "Helm"           "install_helm"
     execute_tool "aws"      "AWS CLI"        "install_aws"
     execute_tool "az"       "Azure CLI"      "install_az"
     execute_tool "k9s"      "k9s"            "install_k9s"
