@@ -78,3 +78,7 @@ A `Dockerfile` is provided to test the setup in a clean Ubuntu 24.04 environment
 docker build -t ubuntu-dev-env .
 docker run -it ubuntu-dev-env
 ```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
