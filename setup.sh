@@ -3,6 +3,7 @@
 # High-signal, idempotent, and Docker-aware automation.
 
 set -e
+set -o pipefail
 
 # --- Globals ---
 LOG_FILE="/tmp/ubuntu_setup_$(date +%Y%m%d_%H%M%S).log"
@@ -23,13 +24,14 @@ on_failure() {
         if [ -f "$LOG_FILE" ]; then
             echo -e "${YELLOW}--- Verbose Log Output (from $LOG_FILE) ---${NC}"
             cat "$LOG_FILE"
-            echo -e "${YELLOW}--- End of Log ---${NC}"
         fi
     fi
 }
 
 cleanup() {
-    [ -n "$SUDO_ALIVE_PID" ] && kill "$SUDO_ALIVE_PID" 2>/dev/null || true
+    if [ -n "$SUDO_ALIVE_PID" ]; then
+        kill "$SUDO_ALIVE_PID" 2>/dev/null || true
+    fi
 }
 trap "on_failure; cleanup" EXIT
 
@@ -37,23 +39,29 @@ keep_sudo_alive() {
     while true; do sudo -n -v 2>/dev/null || true; sleep 60; done
 }
 
-# Detect if running in a non-interactive environment or container
 is_container() {
-    [ -f /.dockerenv ] || grep -qE "docker|podman|containerd" /proc/1/cgroup 2>/dev/null
+    if [ -n "$container" ] || [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+        return 0
+    fi
+    if grep -qE "docker|podman|containerd" /proc/1/cgroup 2>/dev/null; then
+        return 0
+    fi
+    return 1
 }
 
 prime_sudo() {
-    if ! is_container && [ -t 1 ]; then
+    if ! is_container && [ -t 1 ] && [ -c /dev/tty ]; then
         if ! sudo -n true 2>/dev/null; then
             log_warn "Sudo privileges required. Please enter your password:"
-            # Redirect from /dev/tty ensures this works even when script is piped (curl | bash)
             sudo -v < /dev/tty || return 1
         fi
     fi
     return 0
 }
 
-run_quiet() { "$@" >> "$LOG_FILE" 2>&1; }
+run_quiet() {
+    "$@" >> "$LOG_FILE" 2>&1
+}
 
 show_spinner() {
     local pid=$1; local spinstr='|/-\'
@@ -62,32 +70,46 @@ show_spinner() {
             local temp=${spinstr#?}; printf " [%c]  " "$spinstr"; spinstr=$temp${spinstr%"$temp"}
             sleep 0.1; printf "\b\b\b\b\b\b"
         done; printf "    \b\b\b\b"
-    else wait "$pid"; fi
+    else
+        wait "$pid"
+    fi
 }
 
 run_logged() {
-    local msg="$1"; shift; [[ "$*" == *"sudo"* ]] && prime_sudo
+    local msg="$1"; shift
+    if [[ "$*" == *"sudo"* ]]; then
+        prime_sudo
+    fi
     printf "${BLUE}[INFO]${NC}  $msg... "
     "$@" >> "$LOG_FILE" 2>&1 &
-    show_spinner $!; wait $! && (printf "\r${GREEN}[OK]${NC}    $msg.   \n"; return 0) || (printf "\r${RED}[ERROR]${NC} $msg. Check $LOG_FILE\n"; return 1)
+    local pid=$!
+    if show_spinner "$pid" && wait "$pid"; then
+        printf "\r${GREEN}[OK]${NC}    $msg.   \n"
+        return 0
+    else
+        printf "\r${RED}[ERROR]${NC} $msg. Check $LOG_FILE\n"
+        return 1
+    fi
 }
 
 source_nvm() {
     export NVM_DIR="$HOME/.nvm"
     if [ -s "$NVM_DIR/nvm.sh" ]; then
         \. "$NVM_DIR/nvm.sh"
-        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
     fi
-    return 0
 }
 
 execute_tool() {
-    local bin="$1" name="$2" func="$3"
-    [[ "$bin" =~ ^(nvm|npm|node|gemini|tldr)$ ]] && source_nvm
+    local bin="$1" name="$2" func="$3"; shift 3
+    if [[ "$bin" =~ ^(nvm|npm|node|gemini|tldr)$ ]]; then
+        source_nvm
+    fi
+    
     if command -v "$bin" >/dev/null 2>&1; then
-        log_skip "$name is already installed."; SKIPPED+=("$name")
+        log_skip "$name is already installed."
+        SKIPPED+=("$name")
     else
-        if run_logged "Installing $name" $func; then
+        if run_logged "Installing $name" "$func" "$@"; then
             INSTALLED+=("$name")
         else
             FAILED+=("$name")
@@ -95,8 +117,33 @@ execute_tool() {
     fi
 }
 
+# --- Generic Helpers ---
+apt_install() {
+    run_quiet sudo apt-get install -y "$@"
+}
+
+add_apt_repo() {
+    local key_url="$1" name="$2" repo_line="$3"
+    wget -qO- "$key_url" | gpg --dearmor | sudo tee "/usr/share/keyrings/${name}.gpg" > /dev/null
+    echo "$repo_line" | sudo tee "/etc/apt/sources.list.d/${name}.list" > /dev/null
+    run_quiet sudo apt-get update
+}
+
+github_bin_install() {
+    local repo="$1" bin_name="$2" asset_pattern="$3"
+    local v; v=$(curl -s "https://api.github.com/repos/${repo}/releases/latest" | jq -r .tag_name)
+    local url; url="https://github.com/${repo}/releases/download/${v}/${asset_pattern//\{v\}/$v}"
+    mkdir -p "$HOME/.local/bin"
+    wget -qO "/tmp/${bin_name}.tar.gz" "$url"
+    tar -xzf "/tmp/${bin_name}.tar.gz" -C "$HOME/.local/bin" "$bin_name"
+    rm "/tmp/${bin_name}.tar.gz"
+}
+
 safe_gsettings_set() {
     local schema="$1" key="$2" value="$3"
+    if ! command -v gsettings >/dev/null 2>&1; then
+        return 0
+    fi
     if gsettings list-schemas | grep -q "^$schema$" && gsettings list-keys "$schema" | grep -q "^$key$"; then
         local clean_value; clean_value=$(echo "$value" | sed "s/^@as //; s/^'//; s/'$//")
         local current; current=$(gsettings get "$schema" "$key" | sed "s/^@as //; s/^'//; s/'$//")
@@ -107,131 +154,104 @@ safe_gsettings_set() {
                 FAILED+=("$key")
             fi
         else
-            log_skip "$key is already configured."; SKIPPED+=("$key")
+            log_skip "$key is already configured."
+            SKIPPED+=("$key")
         fi
     fi
 }
 
-# --- Installers ---
-install_git()    { run_quiet sudo apt-get install -y git; }
-install_htop()   { run_quiet sudo apt-get install -y htop; }
-install_nano()   { run_quiet sudo apt-get install -y nano; }
-install_podman() { run_quiet sudo apt-get install -y podman; }
-install_jq()     { run_quiet sudo apt-get install -y jq; }
-install_tree()   { run_quiet sudo apt-get install -y tree; }
-install_compose() { run_quiet sudo apt-get install -y podman-compose; }
-install_ansible() { run_quiet sudo apt-get install -y ansible; }
+# --- Specialized Installers ---
+install_bat() {
+    apt_install bat
+    mkdir -p "$HOME/.local/bin"
+    ln -sf /usr/bin/batcat "$HOME/.local/bin/bat"
+}
 
 install_uv() {
     curl -LsSf https://astral.sh/uv/install.sh | run_quiet sh
 }
 
-install_bat() {
-    run_quiet sudo apt-get install -y bat
-    mkdir -p "$HOME/.local/bin"
-    ln -sf /usr/bin/batcat "$HOME/.local/bin/bat"
-}
-
 install_nvm() {
     local v; v=$(basename "$(curl -Ls -o /dev/null -w "%{url_effective}" https://github.com/nvm-sh/nvm/releases/latest)")
     curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/${v:-v0.39.7}/install.sh" | run_quiet bash
-    source_nvm; ! command -v node >/dev/null 2>&1 && run_quiet nvm install --lts
+    source_nvm
+    if ! command -v node >/dev/null 2>&1; then
+        run_quiet nvm install --lts
+    fi
 }
 
 install_gh() {
-    sudo mkdir -p -m 755 /etc/apt/keyrings
-    wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y gh
+    add_apt_repo "https://cli.github.com/packages/githubcli-archive-keyring.gpg" "github-cli" \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+    apt_install gh
 }
 
 install_vscode() {
-    wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /usr/share/keyrings/microsoft.gpg > /dev/null
-    echo "Types: deb
-URIs: https://packages.microsoft.com/repos/code
-Suites: stable
-Components: main
-Architectures: amd64,arm64,armhf
-Signed-By: /usr/share/keyrings/microsoft.gpg" | sudo tee /etc/apt/sources.list.d/vscode.sources > /dev/null
-    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y code
+    add_apt_repo "https://packages.microsoft.com/keys/microsoft.asc" "vscode" \
+        "deb [arch=amd64,arm64,armhf signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main"
+    apt_install code
 }
 
 install_chrome() {
-    if [ "$(dpkg --print-architecture)" == "amd64" ]; then
-        wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-        run_quiet sudo apt-get install -y /tmp/chrome.deb && rm /tmp/chrome.deb
-    else return 1; fi
+    if [ "$(dpkg --print-architecture)" != "amd64" ]; then
+        return 1
+    fi
+    wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    apt_install /tmp/chrome.deb
+    rm /tmp/chrome.deb
 }
 
-install_nvidia_drivers() {
-    run_quiet sudo apt-get install -y ubuntu-drivers-common && run_quiet sudo ubuntu-drivers install
-}
-
-install_nvidia_toolkit() {
-    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-    curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
-        sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-        sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y nvidia-container-toolkit
+install_opentofu() {
+    curl --proto '=https' --tlsv1.2 -fsSL https://get.opentofu.org/install-opentofu.sh -o /tmp/tofu.sh
+    chmod +x /tmp/tofu.sh
+    run_quiet /tmp/tofu.sh --install-method deb
+    rm /tmp/tofu.sh
 }
 
 install_gcloud() {
-    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
-    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
-    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y google-cloud-cli
+    add_apt_repo "https://packages.cloud.google.com/apt/doc/apt-key.gpg" "google-cloud" \
+        "deb [signed-by=/usr/share/keyrings/google-cloud.gpg] https://packages.cloud.google.com/apt cloud-sdk main"
+    apt_install google-cloud-cli
 }
 
 install_kubectl() {
-    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-    sudo chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-    sudo chmod 644 /etc/apt/sources.list.d/kubernetes.list
-    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y kubectl
+    add_apt_repo "https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key" "kubernetes" \
+        "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
+    apt_install kubectl
 }
 
 install_kubectx() {
     local v; v=$(curl -s https://api.github.com/repos/ahmetb/kubectx/releases/latest | jq -r .tag_name)
     mkdir -p "$HOME/.local/bin"
-    wget -qO /tmp/kubectx.tar.gz "https://github.com/ahmetb/kubectx/releases/download/${v}/kubectx_${v}_linux_x86_64.tar.gz"
-    wget -qO /tmp/kubens.tar.gz "https://github.com/ahmetb/kubectx/releases/download/${v}/kubens_${v}_linux_x86_64.tar.gz"
-    tar -xzf /tmp/kubectx.tar.gz -C "$HOME/.local/bin" kubectx
-    tar -xzf /tmp/kubens.tar.gz -C "$HOME/.local/bin" kubens
-    rm /tmp/kubectx.tar.gz /tmp/kubens.tar.gz
+    for tool in kubectx kubens; do
+        wget -qO "/tmp/${tool}.tar.gz" "https://github.com/ahmetb/kubectx/releases/download/${v}/${tool}_${v}_linux_x86_64.tar.gz"
+        tar -xzf "/tmp/${tool}.tar.gz" -C "$HOME/.local/bin" "$tool"
+        rm "/tmp/${tool}.tar.gz"
+    done
 }
 
 install_aws() {
-    wget -qO /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
-    unzip -q /tmp/awscliv2.zip -d /tmp
-    sudo /tmp/aws/install --update >> "$LOG_FILE" 2>&1
-    rm -rf /tmp/aws /tmp/awscliv2.zip
+    wget -qO /tmp/aws.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+    unzip -q /tmp/aws.zip -d /tmp
+    run_quiet sudo /tmp/aws/install --update
+    rm -rf /tmp/aws /tmp/aws.zip
 }
 
-install_az() {
-    curl -sL https://aka.ms/InstallAzureCLIDeb | run_quiet sudo bash
-}
+install_az()      { curl -sL https://aka.ms/InstallAzureCLIDeb | run_quiet sudo bash; }
+install_k9s()     { github_bin_install "derailed/k9s" "k9s" "k9s_Linux_amd64.tar.gz"; }
+install_yq()      { sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 && sudo chmod +x /usr/local/bin/yq; }
+install_gemini()  { run_quiet npm install -g @google/gemini-cli; }
+install_tldr()    { run_quiet npm install -g tldr; }
 
-install_k9s() {
-    local v; v=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | jq -r .tag_name)
-    mkdir -p "$HOME/.local/bin"
-    wget -qO /tmp/k9s.tar.gz "https://github.com/derailed/k9s/releases/download/${v}/k9s_Linux_amd64.tar.gz"
-    tar -xzf /tmp/k9s.tar.gz -C "$HOME/.local/bin" k9s
-    rm /tmp/k9s.tar.gz
-}
-
-install_opentofu() {
-    # Download the installer script:
-    curl --proto '=https' --tlsv1.2 -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
-    # Give it execution permissions:
-    chmod +x install-opentofu.sh
-    # Run the installer:
-    ./install-opentofu.sh --install-method deb
-    # Remove the installer:
-    rm -f install-opentofu.sh
-}
-
-install_yq() {
-    sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-    sudo chmod +x /usr/local/bin/yq
+install_nvidia() {
+    apt_install ubuntu-drivers-common
+    run_quiet sudo ubuntu-drivers install
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia.gpg
+    curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+        sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia.gpg] https://#g' | \
+        sudo tee /etc/apt/sources.list.d/nvidia.list > /dev/null
+    run_quiet sudo apt-get update
+    apt_install nvidia-container-toolkit
 }
 
 # --- Configuration ---
@@ -245,17 +265,14 @@ configure_system() {
     if command -v fwupdmgr >/dev/null 2>&1; then
         run_quiet sudo fwupdmgr refresh --force || true
         if sudo fwupdmgr get-updates >> "$LOG_FILE" 2>&1; then
-            if run_logged "Applying firmware updates" sudo fwupdmgr update -y; then
-                INSTALLED+=("Firmware")
-            else
-                FAILED+=("Firmware")
-            fi
+            if run_logged "Applying firmware updates" sudo fwupdmgr update -y; then INSTALLED+=("Firmware"); else FAILED+=("Firmware"); fi
         else
-            log_skip "Firmware is already up to date."; SKIPPED+=("Firmware")
+            log_skip "Firmware is already up to date."
+            SKIPPED+=("Firmware")
         fi
     fi
 
-    if [ -n "$DISPLAY" ]; then
+    if [ -n "$DISPLAY" ] && command -v gsettings >/dev/null 2>&1; then
         if command -v powerprofilesctl >/dev/null 2>&1; then
             if [ "$(powerprofilesctl get)" != "performance" ]; then
                 if run_logged "Setting power profile to performance" sudo powerprofilesctl set performance; then
@@ -264,13 +281,18 @@ configure_system() {
                     FAILED+=("Power Profile")
                 fi
             else
-                log_skip "Power profile is already set to performance."; SKIPPED+=("Power Profile")
+                log_skip "Power profile is already set to performance."
+                SKIPPED+=("Power Profile")
             fi
         fi
         
         local schemas; schemas=$(gsettings list-schemas)
-        local s; echo "$schemas" | grep -q "dash-to-dock" && s="org.gnome.shell.extensions.dash-to-dock"
-        [ -z "$s" ] && echo "$schemas" | grep -q "ubuntu-dock" && s="org.gnome.shell.extensions.ubuntu-dock"
+        local s;
+        if echo "$schemas" | grep -q "dash-to-dock"; then
+            s="org.gnome.shell.extensions.dash-to-dock"
+        elif echo "$schemas" | grep -q "ubuntu-dock"; then
+            s="org.gnome.shell.extensions.ubuntu-dock"
+        fi
         
         if [ -n "$s" ]; then 
             safe_gsettings_set "$s" "dock-position" "'BOTTOM'"
@@ -298,7 +320,8 @@ EOF"; then
                 FAILED+=("Bash Prompt")
             fi
         else
-            log_skip "Bash prompt is already configured."; SKIPPED+=("Bash Prompt")
+            log_skip "Bash prompt is already configured."
+            SKIPPED+=("Bash Prompt")
         fi
     fi
 }
@@ -307,64 +330,68 @@ EOF"; then
 main() {
     touch "$LOG_FILE"; echo -e "${BLUE}=== Ubuntu Setup ===${NC}\nLogs: $LOG_FILE"
     
-    if ! is_container; then
-        prime_sudo; keep_sudo_alive & SUDO_ALIVE_PID=$!
+    if is_container; then
+        run_logged "Initializing container environment" sudo apt-get update
+    else
+        prime_sudo
+        keep_sudo_alive & SUDO_ALIVE_PID=$!
     fi
 
     source_nvm
     export PATH="$HOME/.local/bin:$PATH"
 
-    run_logged "Ensuring base requirements" bash -c "sudo apt-get update && sudo apt-get install -y curl wget gpg pciutils build-essential unzip"
+    run_logged "Ensuring base requirements" apt_install curl wget gpg pciutils build-essential unzip
 
     # CLI Toolchain
-    execute_tool "git"      "Git"            "install_git"
-    execute_tool "gh"       "GitHub CLI"     "install_gh"
-    execute_tool "uv"       "uv"             "install_uv"
-    execute_tool "podman"   "Podman"         "install_podman"
-    execute_tool "nvm"      "nvm/Node"       "install_nvm"
-    execute_tool "htop"     "htop"           "install_htop"
-    execute_tool "nano"     "nano"           "install_nano"
-    execute_tool "jq"       "jq"             "install_jq"
-    execute_tool "yq"       "yq"             "install_yq"
-    execute_tool "tree"     "tree"           "install_tree"
-    execute_tool "bat"      "bat"            "install_bat"
-    execute_tool "podman-compose" "Compose"  "install_compose"
+    execute_tool "git"      "Git"            apt_install git
+    execute_tool "gh"       "GitHub CLI"     install_gh
+    execute_tool "uv"       "uv"             install_uv
+    execute_tool "podman"   "Podman"         apt_install podman
+    execute_tool "nvm"      "nvm/Node"       install_nvm
+    execute_tool "htop"     "htop"           apt_install htop
+    execute_tool "nano"     "nano"           apt_install nano
+    execute_tool "jq"       "jq"             apt_install jq
+    execute_tool "yq"       "yq"             install_yq
+    execute_tool "tree"     "tree"           apt_install tree
+    execute_tool "bat"      "bat"            install_bat
+    execute_tool "podman-compose" "Compose"  apt_install podman-compose
     
     # DevOps & IaC
-    execute_tool "tofu"     "OpenTofu"       "install_opentofu"
-    execute_tool "ansible"  "Ansible"        "install_ansible"
+    execute_tool "tofu"     "OpenTofu"       install_opentofu
+    execute_tool "ansible"  "Ansible"        apt_install ansible
 
     # Cloud & Kubernetes
-    execute_tool "gcloud"   "Google Cloud"   "install_gcloud"
-    execute_tool "kubectl"  "kubectl"        "install_kubectl"
-    execute_tool "kubectx"  "kubectx/kubens" "install_kubectx"
-    execute_tool "aws"      "AWS CLI"        "install_aws"
+    execute_tool "gcloud"   "Google Cloud"   install_gcloud
+    execute_tool "kubectl"  "kubectl"        install_kubectl
+    execute_tool "kubectx"  "kubectx/kubens" install_kubectx
+    execute_tool "aws"      "AWS CLI"        install_aws
     execute_tool "az"       "Azure CLI"      "install_az"
-    execute_tool "k9s"      "k9s"            "install_k9s"
+    execute_tool "k9s"      "k9s"            install_k9s
 
     # Node tools
-    execute_tool "gemini"   "Gemini CLI"     "run_quiet npm install -g @google/gemini-cli"
-    execute_tool "tldr"     "tldr"           "run_quiet npm install -g tldr"
+    execute_tool "gemini"   "Gemini CLI"     install_gemini
+    execute_tool "tldr"     "tldr"           install_tldr
 
     # Hardware Specific
-    if ! is_container && command -v lspci >/dev/null 2>&1 && lspci | grep -iq "nvidia"; then
-        execute_tool "nvidia-smi" "NVIDIA Driver"  "install_nvidia_drivers"
-        execute_tool "nvidia-container-cli" "NVIDIA Toolkit" "install_nvidia_toolkit"
+    if ! is_container; then
+        if command -v lspci >/dev/null 2>&1 && lspci | grep -iq "nvidia"; then
+            execute_tool "nvidia-smi" "NVIDIA Driver" install_nvidia
+        fi
     fi
 
     # GUI Applications
     if [ -n "$DISPLAY" ] || [ -n "$XDG_CURRENT_DESKTOP" ]; then
-        execute_tool "code"   "VS Code" "install_vscode"
-        execute_tool "google-chrome-stable" "Chrome" "install_chrome"
+        execute_tool "code"   "VS Code" install_vscode
+        execute_tool "google-chrome-stable" "Chrome" install_chrome
     fi
     
     configure_system
 
     echo -e "\n${GREEN}==========================================${NC}"
     log_success "Setup Complete!"
-    [ ${#INSTALLED[@]} -gt 0 ] && echo -e "${BLUE}Installed:${NC} ${INSTALLED[*]}"
-    [ ${#SKIPPED[@]} -gt 0 ]   && echo -e "${YELLOW}Skipped:${NC}   ${SKIPPED[*]}"
-    [ ${#FAILED[@]} -gt 0 ]    && echo -e "${RED}Failed:${NC}    ${FAILED[*]}"
+    [ ${#INSTALLED[@]} -gt 0 ] && echo -e "${BLUE}Installed/Configured:${NC} ${INSTALLED[*]}"
+    [ ${#SKIPPED[@]} -gt 0 ]   && echo -e "${YELLOW}Skipped (Up-to-date):${NC} ${SKIPPED[*]}"
+    [ ${#FAILED[@]} -gt 0 ]    && echo -e "${RED}Failed:${NC}               ${FAILED[*]}"
     echo -e "${GREEN}==========================================${NC}"
     echo -e "Run 'source ~/.bashrc' to apply changes."
 }
