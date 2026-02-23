@@ -52,6 +52,12 @@ Alternatively, you can clone the repository and run it locally:
 *   **AI:** `@google/gemini-cli`
 *   **Modern Utilities:** `jq`, `bat`, `tldr`, `tree`, `htop`, `nano`
 
+### Cloud & Kubernetes
+*   **Google Cloud:** `gcloud` CLI
+*   **Kubernetes:** `kubectl`, `k9s`, `kubectx`, `kubens`
+*   **AWS:** `aws` CLI v2
+*   **Azure:** `az` CLI
+
 ### GUI Applications (Auto-detected)
 *   **Visual Studio Code:** Professional code editor.
 *   **Google Chrome:** Web browser (amd64 only).

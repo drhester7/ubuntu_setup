@@ -163,6 +163,49 @@ install_nvidia_toolkit() {
     run_quiet sudo apt-get update && run_quiet sudo apt-get install -y nvidia-container-toolkit
 }
 
+install_gcloud() {
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y google-cloud-cli
+}
+
+install_kubectl() {
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    sudo chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    sudo chmod 644 /etc/apt/sources.list.d/kubernetes.list
+    run_quiet sudo apt-get update && run_quiet sudo apt-get install -y kubectl
+}
+
+install_kubectx() {
+    local v; v=$(curl -s https://api.github.com/repos/ahmetb/kubectx/releases/latest | jq -r .tag_name)
+    mkdir -p "$HOME/.local/bin"
+    wget -qO /tmp/kubectx.tar.gz "https://github.com/ahmetb/kubectx/releases/download/${v}/kubectx_${v}_linux_x86_64.tar.gz"
+    wget -qO /tmp/kubens.tar.gz "https://github.com/ahmetb/kubectx/releases/download/${v}/kubens_${v}_linux_x86_64.tar.gz"
+    tar -xzf /tmp/kubectx.tar.gz -C "$HOME/.local/bin" kubectx
+    tar -xzf /tmp/kubens.tar.gz -C "$HOME/.local/bin" kubens
+    rm /tmp/kubectx.tar.gz /tmp/kubens.tar.gz
+}
+
+install_aws() {
+    wget -qO /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+    unzip -q /tmp/awscliv2.zip -d /tmp
+    sudo /tmp/aws/install --update >> "$LOG_FILE" 2>&1
+    rm -rf /tmp/aws /tmp/awscliv2.zip
+}
+
+install_az() {
+    curl -sL https://aka.ms/InstallAzureCLIDeb | run_quiet sudo bash
+}
+
+install_k9s() {
+    local v; v=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | jq -r .tag_name)
+    mkdir -p "$HOME/.local/bin"
+    wget -qO /tmp/k9s.tar.gz "https://github.com/derailed/k9s/releases/download/${v}/k9s_Linux_amd64.tar.gz"
+    tar -xzf /tmp/k9s.tar.gz -C "$HOME/.local/bin" k9s
+    rm /tmp/k9s.tar.gz
+}
+
 # --- Configuration ---
 configure_system() {
     run_logged "Updating system and maintenance" bash -c "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get autoremove -y && sudo apt-get autoclean"
@@ -212,7 +255,7 @@ main() {
     source_nvm
     export PATH="$HOME/.local/bin:$PATH"
 
-    run_logged "Ensuring base requirements" bash -c "sudo apt-get update && sudo apt-get install -y curl wget gpg pciutils build-essential"
+    run_logged "Ensuring base requirements" bash -c "sudo apt-get update && sudo apt-get install -y curl wget gpg pciutils build-essential unzip"
 
     # CLI Toolchain
     execute_tool "git"      "Git"            "install_git"
@@ -227,6 +270,14 @@ main() {
     execute_tool "bat"      "bat"            "install_bat"
     execute_tool "podman-compose" "Compose"  "install_compose"
     
+    # Cloud & Kubernetes
+    execute_tool "gcloud"   "Google Cloud"   "install_gcloud"
+    execute_tool "kubectl"  "kubectl"        "install_kubectl"
+    execute_tool "kubectx"  "kubectx/kubens" "install_kubectx"
+    execute_tool "aws"      "AWS CLI"        "install_aws"
+    execute_tool "az"       "Azure CLI"      "install_az"
+    execute_tool "k9s"      "k9s"            "install_k9s"
+
     # Node tools
     source_nvm
     execute_tool "gemini"   "Gemini CLI"     "run_quiet npm install -g @google/gemini-cli"
