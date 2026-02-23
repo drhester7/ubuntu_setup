@@ -244,8 +244,7 @@ configure_system() {
             safe_gsettings_set "$s" "dock-fixed" "false"
             safe_gsettings_set "$s" "extend-height" "false"
         fi
-        safe_gsettings_set "org.gnome.desktop.interface" "scaling-factor" "1"
-        safe_gsettings_set "org.gnome.desktop.interface" "text-scaling-factor" "1.0"
+        safe_gsettings_set "org.gnome.mutter" "experimental-features" "[]"
         safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
         safe_gsettings_set "org.gnome.desktop.background" "picture-uri-dark" "file:///usr/share/backgrounds/Quokka_Everywhere_by_Dilip.png"
     fi
