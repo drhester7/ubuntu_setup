@@ -334,18 +334,11 @@ configure_system() {
     else
         FAILED+=("System Updates")
     fi
-    
-    if is_bare_metal && command -v fwupdmgr >/dev/null 2>&1; then
-        run_quiet sudo fwupdmgr refresh --force || true
-        if sudo fwupdmgr get-updates >> "$LOG_FILE" 2>&1; then
-            if run_logged "Applying firmware updates" sudo fwupdmgr update -y; then INSTALLED+=("Firmware"); else FAILED+=("Firmware"); fi
-        else
-            log_skip "Firmware is already up to date."
-            SKIPPED+=("Firmware")
-        fi
-    elif ! is_bare_metal; then
-        log_incompat "Firmware Updates"
-        INCOMPATIBLE+=("Firmware Updates")
+
+    if run_logged "Disabling error reporting" bash -c "sudo systemctl disable --now apport whoopsie 2>/dev/null || true"; then
+        INSTALLED+=("Error Reporting Disabled")
+    else
+        FAILED+=("Error Reporting Disabled")
     fi
 
     if [ -n "$DISPLAY" ] && command -v gsettings >/dev/null 2>&1; then
@@ -372,7 +365,13 @@ configure_system() {
             safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "dock-fixed" "false"
             safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "extend-height" "false"
             safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "dash-max-icon-size" "32"
+            safe_gsettings_set "org.gnome.shell.extensions.ding" "icon-size" "'small'"
+            safe_gsettings_set "org.gnome.shell.extensions.ding" "new-icons-location" "'top-left'"
+            safe_gsettings_set "org.gnome.shell.extensions.ding" "show-home" "false"
             safe_gsettings_set "org.gnome.mutter" "experimental-features" "[]"
+            safe_gsettings_set "org.gnome.mutter" "workspaces-only-on-primary" "false"
+            safe_gsettings_set "org.gnome.desktop.session" "idle-delay" "900"
+            safe_gsettings_set "org.gnome.desktop.privacy" "report-technical-problems" "false"
             safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
             safe_gsettings_set "org.gnome.desktop.background" "picture-uri-dark" "'file:///usr/share/backgrounds/Quokka_Everywhere_by_Dilip.png'"
         fi
