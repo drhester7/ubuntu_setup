@@ -318,6 +318,28 @@ install_aws() {
 install_az()      { curl -sL https://aka.ms/InstallAzureCLIDeb | run_quiet sudo bash; }
 install_k9s()     { github_bin_install "derailed/k9s" "k9s" "k9s_Linux_amd64.tar.gz"; }
 install_yq()      { sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 && sudo chmod +x /usr/local/bin/yq; }
+
+install_gitleaks() {
+    local v; v=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r .tag_name)
+    local ver="${v#v}"
+    wget -qO /tmp/gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/${v}/gitleaks_${ver}_linux_x64.tar.gz"
+    tar -xzf /tmp/gitleaks.tar.gz -C "$HOME/.local/bin" gitleaks
+    rm /tmp/gitleaks.tar.gz
+}
+
+install_sops() {
+    local v; v=$(curl -s https://api.github.com/repos/getsops/sops/releases/latest | jq -r .tag_name)
+    wget -qO "$HOME/.local/bin/sops" "https://github.com/getsops/sops/releases/download/${v}/sops-${v}.linux.amd64"
+    chmod +x "$HOME/.local/bin/sops"
+}
+
+install_terraform_docs() {
+    local v; v=$(curl -s https://api.github.com/repos/terraform-docs/terraform-docs/releases/latest | jq -r .tag_name)
+    wget -qO /tmp/tfdocs.tar.gz "https://github.com/terraform-docs/terraform-docs/releases/download/${v}/terraform-docs-${v}-linux-amd64.tar.gz"
+    tar -xzf /tmp/tfdocs.tar.gz -C "$HOME/.local/bin" terraform-docs
+    rm /tmp/tfdocs.tar.gz
+}
+
 install_gemini()  { run_quiet npm install -g @google/gemini-cli; }
 install_tldr()    { run_quiet npm install -g tldr; }
 
@@ -442,11 +464,14 @@ main() {
     # CLI Toolchain
     execute_tool "git"      "Git"            apt_install git
     execute_tool "gh"       "GitHub CLI"     install_gh
+    execute_tool "gitleaks" "gitleaks"       install_gitleaks
     execute_tool "uv"       "uv"             install_uv
     execute_tool "podman"   "Podman"         apt_install podman
     execute_tool "docker"   "Docker Alias"   apt_install podman-docker
     execute_tool "nvm"      "nvm/Node"       install_nvm
     execute_tool "htop"     "htop"           apt_install htop
+    execute_tool "iftop"    "iftop"          apt_install iftop
+    execute_tool "watch"    "watch"          apt_install procps
     execute_tool "nano"     "nano"           apt_install nano
     execute_tool "jq"       "jq"             apt_install jq
     execute_tool "yq"       "yq"             install_yq
@@ -456,8 +481,10 @@ main() {
     execute_tool "podman-compose" "Compose"  apt_install podman-compose
     
     # DevOps & IaC
-    execute_tool "tofu"     "OpenTofu"       install_opentofu
-    execute_tool "ansible"  "Ansible"        apt_install ansible
+    execute_tool "tofu"           "OpenTofu"       install_opentofu
+    execute_tool "sops"           "sops"           install_sops
+    execute_tool "terraform-docs" "terraform-docs" install_terraform_docs
+    execute_tool "ansible"        "Ansible"        apt_install ansible
 
     # Cloud & Kubernetes
     execute_tool "gcloud"   "Google Cloud"   install_gcloud
