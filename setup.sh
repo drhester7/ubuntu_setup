@@ -335,10 +335,15 @@ configure_system() {
         FAILED+=("System Updates")
     fi
 
-    if run_logged "Disabling error reporting" bash -c "sudo systemctl disable --now apport whoopsie 2>/dev/null || true"; then
-        INSTALLED+=("Error Reporting Disabled")
+    if systemctl is-enabled apport >/dev/null 2>&1 || systemctl is-enabled whoopsie >/dev/null 2>&1; then
+        if run_logged "Disabling error reporting" bash -c "sudo systemctl disable --now apport whoopsie 2>/dev/null || true"; then
+            INSTALLED+=("Error Reporting Disabled")
+        else
+            FAILED+=("Error Reporting Disabled")
+        fi
     else
-        FAILED+=("Error Reporting Disabled")
+        log_skip "Error reporting services are already disabled."
+        SKIPPED+=("Error Reporting Disabled")
     fi
 
     if [ -n "$DISPLAY" ] && command -v gsettings >/dev/null 2>&1; then
