@@ -451,6 +451,7 @@ main() {
     execute_tool "jq"       "jq"             apt_install jq
     execute_tool "yq"       "yq"             install_yq
     execute_tool "tree"     "tree"           apt_install tree
+    execute_tool "nmap"     "nmap"           apt_install nmap
     execute_tool "bat"      "bat"            install_bat
     execute_tool "podman-compose" "Compose"  apt_install podman-compose
     
