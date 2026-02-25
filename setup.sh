@@ -444,6 +444,7 @@ main() {
     execute_tool "gh"       "GitHub CLI"     install_gh
     execute_tool "uv"       "uv"             install_uv
     execute_tool "podman"   "Podman"         apt_install podman
+    execute_tool "docker"   "Docker Alias"   apt_install podman-docker
     execute_tool "nvm"      "nvm/Node"       install_nvm
     execute_tool "htop"     "htop"           apt_install htop
     execute_tool "nano"     "nano"           apt_install nano
