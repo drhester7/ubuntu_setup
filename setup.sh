@@ -188,6 +188,8 @@ add_apt_repo() {
         sudo rm -f "$list_path" "$keyring_path"
         return 1
     fi
+    # Refresh global cache to ensure dependencies from other repos are visible
+    run_quiet sudo apt-get update
     return 0
 }
 
@@ -321,7 +323,9 @@ install_tldr()    { run_quiet npm install -g tldr; }
 
 install_nvidia() {
     apt_install ubuntu-drivers-common
-    run_quiet sudo ubuntu-drivers install
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        run_logged "Installing NVIDIA Drivers" sudo ubuntu-drivers install
+    fi
     add_apt_repo "https://nvidia.github.io/libnvidia-container/gpgkey" "nvidia" \
         "deb [signed-by=/etc/apt/keyrings/nvidia.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list /" && \
     apt_install nvidia-container-toolkit
