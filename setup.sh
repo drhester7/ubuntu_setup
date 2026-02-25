@@ -213,12 +213,12 @@ safe_gsettings_set() {
         return 0
     fi
 
-    # Normalize values for comparison (remove @as, quotes, etc.)
-    local clean_value; clean_value=$(echo "$value" | sed -E "s/^@[a-z]+ //; s/^'//; s/'$//")
+    # Normalize values for comparison (remove types like 'uint32', '@as', and quotes)
+    local clean_value; clean_value=$(echo "$value" | sed -E "s/^([a-z0-9]+|@[a-z0-9]+) //; s/^'//; s/'$//")
     local current_raw; 
     
     if current_raw=$(gsettings get "$schema" "$key" 2>/dev/null); then
-        local clean_current; clean_current=$(echo "$current_raw" | sed -E "s/^@[a-z]+ //; s/^'//; s/'$//")
+        local clean_current; clean_current=$(echo "$current_raw" | sed -E "s/^([a-z0-9]+|@[a-z0-9]+) //; s/^'//; s/'$//")
         
         if [ "$clean_current" != "$clean_value" ]; then
             if run_logged "Configuring $key" gsettings set "$schema" "$key" "$value"; then
@@ -335,14 +335,21 @@ configure_system() {
         FAILED+=("System Updates")
     fi
 
-    if systemctl is-enabled apport >/dev/null 2>&1 || systemctl is-enabled whoopsie >/dev/null 2>&1; then
+    local needs_disable=false
+    for svc in apport whoopsie; do
+        if systemctl is-enabled "$svc" 2>/dev/null | grep -qE "^enabled" || systemctl is-active "$svc" 2>/dev/null | grep -qE "^active"; then
+            needs_disable=true; break
+        fi
+    done
+
+    if [ "$needs_disable" = true ]; then
         if run_logged "Disabling error reporting" bash -c "sudo systemctl disable --now apport whoopsie 2>/dev/null || true"; then
             INSTALLED+=("Error Reporting Disabled")
         else
             FAILED+=("Error Reporting Disabled")
         fi
     else
-        log_skip "Error reporting services are already disabled."
+        log_skip "Error reporting services are already disabled or inactive."
         SKIPPED+=("Error Reporting Disabled")
     fi
 
