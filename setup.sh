@@ -407,7 +407,6 @@ configure_system() {
             safe_gsettings_set "org.gnome.shell.extensions.ding" "start-corner" "'top-left'"
             safe_gsettings_set "org.gnome.shell.extensions.ding" "show-home" "false"
             safe_gsettings_set "org.gnome.mutter" "experimental-features" "[]"
-            safe_gsettings_set "org.gnome.mutter" "workspaces-only-on-primary" "false"
             safe_gsettings_set "org.gnome.desktop.session" "idle-delay" "900"
             safe_gsettings_set "org.gnome.desktop.privacy" "report-technical-problems" "false"
             safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
