@@ -378,7 +378,7 @@ configure_system() {
             safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "extend-height" "false"
             safe_gsettings_set "org.gnome.shell.extensions.dash-to-dock" "dash-max-icon-size" "32"
             safe_gsettings_set "org.gnome.shell.extensions.ding" "icon-size" "'small'"
-            safe_gsettings_set "org.gnome.shell.extensions.ding" "new-icons-location" "'top-left'"
+            safe_gsettings_set "org.gnome.shell.extensions.ding" "start-corner" "'top-left'"
             safe_gsettings_set "org.gnome.shell.extensions.ding" "show-home" "false"
             safe_gsettings_set "org.gnome.mutter" "experimental-features" "[]"
             safe_gsettings_set "org.gnome.mutter" "workspaces-only-on-primary" "false"
