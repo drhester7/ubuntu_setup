@@ -195,9 +195,19 @@ add_apt_repo() {
 
 set_grub_key() {
     local key="$1" value="$2"
-    # Remove existing key (including commented out) to ensure clean state
-    sudo sed -i "/^#\?$key=/d" /etc/default/grub
-    echo "$key=$value" | sudo tee -a /etc/default/grub > /dev/null
+    local current_value
+    # Get the current active value (ignoring commented lines)
+    current_value=$(grep "^${key}=" /etc/default/grub 2>/dev/null | cut -d'=' -f2- || true)
+    
+    if [ "$current_value" = "$value" ]; then
+        return 0
+    fi
+
+    if sudo sed -i "/^#\?${key}=/d" /etc/default/grub && \
+       echo "${key}=${value}" | sudo tee -a /etc/default/grub > /dev/null; then
+        return 2 # Signal that a change was made
+    fi
+    return 1 # Error
 }
 
 github_bin_install() {
@@ -357,17 +367,31 @@ configure_boot() {
         return 0
     fi
     
-    local success=true
-    set_grub_key "GRUB_CMDLINE_LINUX_DEFAULT" "\"\"" || success=false
-    set_grub_key "GRUB_GFXMODE" "1920x1080" || success=false
-    set_grub_key "GRUB_GFXPAYLOAD_LINUX" "keep" || success=false
-    set_grub_key "GRUB_TIMEOUT" "0" || success=false
-    set_grub_key "GRUB_RECORDFAIL_TIMEOUT" "0" || success=false
+    local changed=false; local error=false; local res
+    check_grub_res() {
+        res=$?; if [ $res -eq 2 ]; then changed=true; elif [ $res -ne 0 ]; then error=true; fi
+    }
+    
+    set_grub_key "GRUB_CMDLINE_LINUX_DEFAULT" "\"\""; check_grub_res
+    set_grub_key "GRUB_GFXMODE" "1920x1080"; check_grub_res
+    set_grub_key "GRUB_GFXPAYLOAD_LINUX" "keep"; check_grub_res
+    set_grub_key "GRUB_TIMEOUT" "0"; check_grub_res
+    set_grub_key "GRUB_RECORDFAIL_TIMEOUT" "0"; check_grub_res
 
-    if [ "$success" = true ] && run_logged "Updating GRUB configuration" sudo update-grub; then
-        INSTALLED+=("GRUB Optimization")
-    else
+    if [ "$error" = true ]; then
         FAILED+=("GRUB Optimization")
+        return 1
+    fi
+
+    if [ "$changed" = true ]; then
+        if run_logged "Updating GRUB configuration" sudo update-grub; then
+            INSTALLED+=("GRUB Optimization")
+        else
+            FAILED+=("GRUB Optimization")
+        fi
+    else
+        log_skip "GRUB optimization is already configured."
+        SKIPPED+=("GRUB Optimization")
     fi
 }
 
