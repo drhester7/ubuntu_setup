@@ -25,19 +25,23 @@ This project provides a robust automation script (`setup.sh`) to transform a fre
 - **Browser:** Google Chrome (amd64)
 
 ### System Configuration
-- **GNOME Polish:** Optimized dock position (bottom, intellihide), dark mode, desktop icon configuration (small, top-left, hide home folder), and performance power profile.
+- **GNOME Polish:** Optimized dock position (bottom, intellihide), dark mode, desktop icon configuration (small, top-left, hide home folder), and balanced power profile.
 - **Aesthetics:** Sets "Quokka Everywhere" as the default dark mode background.
 - **Display:** Disabled fractional scaling experimental features and sets 15-minute screen blank timeout.
 - **Shell:** Customized Bash prompt with Git branch state tracking and `$HOME/.local/bin` in PATH.
+- **Boot Optimization:** Sets GRUB to 1920x1080 resolution, enables high-resolution payload persistence, and eliminates boot delays (0s timeout).
 - **Privacy & Maintenance:** Disables error reporting to Canonical (`apport`, `whoopsie`) and automates system package maintenance (`apt upgrade`, `autoremove`).
 
 # Hardware Awareness
-The script includes specialized logic to detect NVIDIA hardware using `lspci` and `nvidia-smi`. If found, it automatically installs the appropriate NVIDIA drivers and the NVIDIA Container Toolkit to enable GPU acceleration in Podman/Docker.
+The script includes specialized logic to detect NVIDIA hardware using `lspci` and `nvidia-smi`. If found, it:
+1. Automatically installs the appropriate NVIDIA drivers and the NVIDIA Container Toolkit.
+2. Enables **Early KMS** by adding NVIDIA modules to the initramfs and refreshing the boot image.
 
 # Technical Architecture
 
 ## Modular Helpers
 - **`add_apt_repo`**: Handles modern GPG keyring management in `/etc/apt/keyrings`, ensuring secure and clean repository additions, followed by a global cache refresh to ensure dependency resolution.
+- **`set_grub_key`**: An idempotent helper for modifying GRUB configuration files, ensuring keys are updated or added without duplication.
 - **`execute_tool`**: A high-level wrapper that checks for binary existence before attempting installation, ensuring idempotency.
 - **`safe_gsettings_set`**: Safely modifies GNOME settings only if the schema and key exist, avoiding errors in headless or non-GNOME environments. Normalizes GSettings type prefixes (like `uint32`) for true idempotency.
 - **`run_logged`**: Manages background execution with a spinner UI and detailed logging to `/tmp/ubuntu_setup_*.log`.

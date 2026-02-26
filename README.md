@@ -5,7 +5,8 @@ A robust, idempotent shell script to automate the configuration of a professiona
 ## Key Features
 
 - **🚀 Modern Toolchain:** Installs a curated set of high-performance CLI tools (`uv`, `podman`, `gh`, `jq`, `yq`, `bat`, etc.).
-- **🔧 Hardware-Aware:** Dynamically detects NVIDIA GPUs to install appropriate drivers and container toolkits.
+- **🔧 Hardware-Aware:** Dynamically detects NVIDIA GPUs to install drivers and enable Early KMS (loading modules into `initramfs`).
+- **⚡ Boot Optimization:** Configures GRUB for 1920x1080 resolution and removes boot delays (0s timeout).
 - **🖥️ Desktop Polish:** Configures GNOME for peak productivity (Dock, Dark Mode, Performance profiles, and Desktop Icons).
 - **🛡️ Privacy & Maintenance:** Disables automated error reporting to Canonical and automates system package cleanup.
 - **🐚 Shell Customization:** Enhances the Bash prompt with real-time Git branch integration.

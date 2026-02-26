@@ -193,6 +193,13 @@ add_apt_repo() {
     return 0
 }
 
+set_grub_key() {
+    local key="$1" value="$2"
+    # Remove existing key (including commented out) to ensure clean state
+    sudo sed -i "/^#\?$key=/d" /etc/default/grub
+    echo "$key=$value" | sudo tee -a /etc/default/grub > /dev/null
+}
+
 github_bin_install() {
     local repo="$1" bin_name="$2" asset_pattern="$3"
     local v; v=$(curl -s "https://api.github.com/repos/${repo}/releases/latest" | jq -r .tag_name)
@@ -343,6 +350,27 @@ install_terraform_docs() {
 install_gemini()  { run_quiet npm install -g @google/gemini-cli; }
 install_tldr()    { run_quiet npm install -g tldr; }
 
+configure_boot() {
+    if ! [ -f /etc/default/grub ]; then
+        log_incompat "GRUB configuration not found."
+        INCOMPATIBLE+=("GRUB Optimization")
+        return 0
+    fi
+    
+    local success=true
+    set_grub_key "GRUB_CMDLINE_LINUX_DEFAULT" "\"\"" || success=false
+    set_grub_key "GRUB_GFXMODE" "1920x1080" || success=false
+    set_grub_key "GRUB_GFXPAYLOAD_LINUX" "keep" || success=false
+    set_grub_key "GRUB_TIMEOUT" "0" || success=false
+    set_grub_key "GRUB_RECORDFAIL_TIMEOUT" "0" || success=false
+
+    if [ "$success" = true ] && run_logged "Updating GRUB configuration" sudo update-grub; then
+        INSTALLED+=("GRUB Optimization")
+    else
+        FAILED+=("GRUB Optimization")
+    fi
+}
+
 install_nvidia() {
     apt_install ubuntu-drivers-common
     if ! command -v nvidia-smi >/dev/null 2>&1; then
@@ -351,6 +379,16 @@ install_nvidia() {
     add_apt_repo "https://nvidia.github.io/libnvidia-container/gpgkey" "nvidia" \
         "deb [signed-by=/etc/apt/keyrings/nvidia.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list /" && \
     apt_install nvidia-container-toolkit
+
+    if run_logged "Configuring NVIDIA Early KMS" bash -c "
+        for mod in nvidia nvidia_modeset nvidia_uvm nvidia_drm; do
+            grep -q \"^\$mod\" /etc/initramfs-tools/modules || echo \"\$mod\" | sudo tee -a /etc/initramfs-tools/modules > /dev/null;
+        done;
+        sudo update-initramfs -u"; then
+        INSTALLED+=("NVIDIA Early KMS")
+    else
+        FAILED+=("NVIDIA Early KMS")
+    fi
 }
 
 # --- Configuration ---
@@ -386,14 +424,14 @@ configure_system() {
         else
             log_info "Applying GNOME Desktop customizations..."
             if command -v powerprofilesctl >/dev/null 2>&1; then
-                if [ "$(powerprofilesctl get)" != "performance" ]; then
-                    if run_logged "Setting power profile to performance" sudo powerprofilesctl set performance; then
+                if [ "$(powerprofilesctl get)" != "balanced" ]; then
+                    if run_logged "Setting power profile to balanced" sudo powerprofilesctl set balanced; then
                         INSTALLED+=("Power Profile")
                     else
                         FAILED+=("Power Profile")
                     fi
                 else
-                    log_skip "Power profile is already set to performance."
+                    log_skip "Power profile is already set to balanced."
                     SKIPPED+=("Power Profile")
                 fi
             fi
@@ -455,10 +493,25 @@ main() {
     keep_sudo_alive & SUDO_ALIVE_PID=$!
     configure_system
 
+    run_logged "Ensuring base requirements" apt_install curl wget gpg gnupg pciutils build-essential unzip
+
+    # Hardware Specific
+    if ! is_container; then
+        if is_bare_metal; then
+            configure_boot
+        fi
+        
+        if command -v lspci >/dev/null 2>&1 && lspci | grep -iq "nvidia"; then
+            execute_tool "nvidia-smi" "NVIDIA Driver" install_nvidia
+        fi
+    else
+        log_incompat "NVIDIA Drivers & Boot Optimization"
+        INCOMPATIBLE+=("NVIDIA Drivers")
+        INCOMPATIBLE+=("GRUB Optimization")
+    fi
+
     source_nvm
     export PATH="$HOME/.local/bin:$PATH"
-
-    run_logged "Ensuring base requirements" apt_install curl wget gpg gnupg pciutils build-essential unzip
 
     # CLI Toolchain
     execute_tool "git"      "Git"            apt_install git
@@ -496,16 +549,6 @@ main() {
     # Node tools
     execute_tool "gemini"   "Gemini CLI"     install_gemini
     execute_tool "tldr"     "tldr"           install_tldr
-
-    # Hardware Specific
-    if ! is_container; then
-        if command -v lspci >/dev/null 2>&1 && lspci | grep -iq "nvidia"; then
-            execute_tool "nvidia-smi" "NVIDIA Driver" install_nvidia
-        fi
-    else
-        log_incompat "NVIDIA Drivers"
-        INCOMPATIBLE+=("NVIDIA Drivers")
-    fi
 
     # GUI Applications
     if [ -n "$DISPLAY" ] || [ -n "$XDG_CURRENT_DESKTOP" ]; then
