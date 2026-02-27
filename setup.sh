@@ -555,6 +555,7 @@ main() {
     execute_tool "nmap"     "nmap"           apt_install nmap
     execute_tool "bat"      "bat"            install_bat
     execute_tool "podman-compose" "Compose"  apt_install podman-compose
+    execute_tool "just"     "just"           apt_install just
     
     # DevOps & IaC
     execute_tool "tofu"           "OpenTofu"       install_opentofu
@@ -567,7 +568,7 @@ main() {
     execute_tool "kubectl"  "kubectl"        install_kubectl
     execute_tool "kubectx"  "kubectx/kubens" install_kubectx
     execute_tool "aws"      "AWS CLI"        install_aws
-    execute_tool "az"       "Azure CLI"      "install_az"
+    execute_tool "az"       "Azure CLI"      install_az
     execute_tool "k9s"      "k9s"            install_k9s
 
     # Node tools
