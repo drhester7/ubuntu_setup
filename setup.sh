@@ -138,7 +138,7 @@ source_nvm() {
 
 execute_tool() {
     local bin="$1" name="$2" func="$3"; shift 3
-    if [[ "$bin" =~ ^(nvm|npm|node|gemini|tldr)$ ]]; then
+    if [[ "$bin" =~ ^(nvm|npm|node|tldr)$ ]]; then
         source_nvm
     fi
     
@@ -357,7 +357,9 @@ install_terraform_docs() {
     rm /tmp/tfdocs.tar.gz
 }
 
-install_gemini()  { run_quiet npm install -g @google/gemini-cli; }
+install_antigravity() {
+    curl -fsSL https://antigravity.google/cli/install.sh | run_quiet bash
+}
 install_tldr()    { run_quiet npm install -g tldr; }
 
 configure_boot() {
@@ -571,8 +573,8 @@ main() {
     execute_tool "az"       "Azure CLI"      install_az
     execute_tool "k9s"      "k9s"            install_k9s
 
-    # Node tools
-    execute_tool "gemini"   "Gemini CLI"     install_gemini
+    # AI & Node tools
+    execute_tool "agy"      "Antigravity CLI" install_antigravity
     execute_tool "tldr"     "tldr"           install_tldr
 
     # GUI Applications

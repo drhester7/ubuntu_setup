@@ -18,7 +18,7 @@ This project provides a robust automation script (`setup.sh`) to transform a fre
 - **Kubernetes Utilities:** `k9s`, `kubectx`, `kubens`
 - **Modern Utilities:** `jq`, `yq`, `bat`, `gh`, `htop`, `tldr`, `tree`, `nano`, `watch`, `iftop`, `nmap`
 - **Security:** `gitleaks`
-- **AI Tools:** `@google/gemini-cli`
+- **AI Tools:** Antigravity CLI (`agy`)
 
 ### GUI Applications
 - **Editor:** Visual Studio Code

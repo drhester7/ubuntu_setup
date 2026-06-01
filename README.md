@@ -50,7 +50,7 @@ Alternatively, you can clone the repository and run it locally:
 *   **Python:** `uv` (Extremely fast installer/manager)
 *   **Containers:** `podman`, `podman-compose`, `podman-docker` (Docker CLI alias)
 *   **Runtime:** `nvm` (Node Version Manager) with latest LTS Node.js
-*   **AI:** `@google/gemini-cli`
+*   **AI:** Antigravity CLI (`agy`)
 *   **Modern Utilities:** `jq`, `yq`, `bat`, `tldr`, `tree`, `htop`, `nano`, `watch`
 *   **Networking/Security:** `nmap`, `iftop`
 
@@ -86,7 +86,7 @@ Alternatively, you can clone the repository and run it locally:
 
 ## Testing with Podman/Docker
 
-A `Dockerfile` is provided to test the setup in a clean Ubuntu 24.04 environment:
+A `Dockerfile` is provided to test the setup in a clean Ubuntu 26.04 environment:
 
 ```bash
 podman build -t ubuntu-dev-env .
