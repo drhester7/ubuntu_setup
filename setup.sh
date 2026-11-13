@@ -492,7 +492,10 @@ configure_system() {
             safe_gsettings_set "org.gnome.desktop.session" "idle-delay" "900"
             safe_gsettings_set "org.gnome.desktop.privacy" "report-technical-problems" "false"
             safe_gsettings_set "org.gnome.desktop.interface" "color-scheme" "'prefer-dark'"
-            safe_gsettings_set "org.gnome.desktop.background" "picture-uri-dark" "'file:///usr/share/backgrounds/Quokka_Everywhere_by_Dilip.png'"
+            local dark_wallpaper="/usr/share/backgrounds/ezspain-Ubuntu_Coffee_Mug_Dark.png"
+            if [ -f "$dark_wallpaper" ]; then
+                safe_gsettings_set "org.gnome.desktop.background" "picture-uri-dark" "'file://${dark_wallpaper}'"
+            fi
         fi
     else
         log_incompat "GNOME Desktop settings (DISPLAY not set or gsettings missing)"
