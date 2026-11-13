@@ -160,19 +160,24 @@ apt_install() {
 }
 
 add_apt_repo() {
-    local key_url="$1" name="$2" repo_line="$3"
-    local keyring_dir="/etc/apt/keyrings"
-    local keyring_path="${keyring_dir}/${name}.gpg"
+    local key_url="$1" name="$2" repo_spec="$3"
+    local keyring_path="${4:-/etc/apt/keyrings/${name}.gpg}"
+    local keyring_dir
+    keyring_dir="$(dirname "$keyring_path")"
     local list_path="/etc/apt/sources.list.d/${name}.list"
-    
+
+    if [[ "$repo_spec" == Types:* ]] || [[ "$repo_spec" == *$'\n'* ]]; then
+        list_path="/etc/apt/sources.list.d/${name}.sources"
+    fi
+
     sudo mkdir -p -m 755 "$keyring_dir"
-    
+
     local tmp_key; tmp_key=$(mktemp)
     if ! curl -fsSL "$key_url" -o "$tmp_key"; then
         rm -f "$tmp_key"
         return 1
     fi
-    
+
     if grep -q "BEGIN PGP" "$tmp_key"; then
         cat "$tmp_key" | gpg --dearmor | sudo tee "$keyring_path" > /dev/null
     else
@@ -180,9 +185,9 @@ add_apt_repo() {
     fi
     rm -f "$tmp_key"
     sudo chmod 644 "$keyring_path"
-    
-    echo "$repo_line" | sudo tee "$list_path" > /dev/null
-    
+
+    printf '%s\n' "$repo_spec" | sudo tee "$list_path" > /dev/null
+
     # Validate the repo with a targeted update
     if ! run_quiet sudo apt-get update -o Dir::Etc::sourcelist="$list_path" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"; then
         sudo rm -f "$list_path" "$keyring_path"
@@ -282,8 +287,21 @@ install_gh() {
 }
 
 install_vscode() {
-    add_apt_repo "https://packages.microsoft.com/keys/microsoft.asc" "vscode" \
-        "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/vscode.gpg] https://packages.microsoft.com/repos/code stable main" && \
+    local keyring_path="/usr/share/keyrings/microsoft.gpg"
+    local repo_spec
+    repo_spec=$(cat <<EOF
+Types: deb
+URIs: https://packages.microsoft.com/repos/code
+Suites: stable
+Components: main
+Architectures: amd64,arm64,armhf
+Signed-By: ${keyring_path}
+EOF
+)
+    # Remove legacy .list / keyring to prevent apt Signed-By conflicts
+    sudo rm -f /etc/apt/sources.list.d/vscode.list /etc/apt/keyrings/vscode.gpg
+
+    add_apt_repo "https://packages.microsoft.com/keys/microsoft.asc" "vscode" "$repo_spec" "$keyring_path" && \
     apt_install code
 }
 
@@ -597,4 +615,6 @@ main() {
     echo -e "Run 'source ~/.bashrc' to apply changes."
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
